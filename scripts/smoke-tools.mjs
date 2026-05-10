@@ -9,6 +9,8 @@ const EXPECTED_TOOLS = new Set([
   "cgm_connection_status",
   "cgm_privacy_audit",
   "cgm_data_inventory",
+  "cgm_quickstart",
+  "cgm_demo",
   "cgm_glucose_now",
   "cgm_glucose_window",
   "cgm_daily_summary",
@@ -79,9 +81,26 @@ assert.ok(privacy.local_storage.includes("wellness-cgm"));
 console.log("✓ cgm_privacy_audit returns local-storage path");
 
 const auth = JSON.parse((await client.callTool({ name: "cgm_authorize_url", arguments: {} })).content[0].text);
-// Without DEXCOM_CLIENT_ID this should report ok: false but cleanly
+// Without DEXCOM_CLIENT_ID this should report ok: false but cleanly with a hint
 assert.ok(typeof auth.ok === "boolean");
-console.log(`✓ cgm_authorize_url returns ok=${auth.ok}`);
+if (!auth.ok) {
+  assert.ok(auth.hint, "missing-creds case should include a hint");
+  assert.ok(auth.recommended_redirect, "missing-creds case should suggest a redirect URI");
+}
+console.log(`✓ cgm_authorize_url returns ok=${auth.ok} (with hint when missing creds)`);
+
+const quickstart = JSON.parse((await client.callTool({ name: "cgm_quickstart", arguments: {} })).content[0].text);
+assert.equal(quickstart.ok, true);
+assert.ok(Array.isArray(quickstart.steps) && quickstart.steps.length === 3);
+assert.ok(["mock", "live"].includes(quickstart.current_mode));
+console.log(`✓ cgm_quickstart returns 3-step walkthrough (mode=${quickstart.current_mode})`);
+
+const demo = JSON.parse((await client.callTool({ name: "cgm_demo", arguments: {} })).content[0].text);
+assert.equal(demo.is_demo, true);
+assert.ok(demo.sample.cgm_glucose_now);
+assert.ok(demo.sample.cgm_daily_summary);
+assert.ok(demo.sample.cgm_meal_response);
+console.log(`✓ cgm_demo returns 3 sample payloads`);
 
 await client.close();
 console.log("\nall smoke checks passed.");

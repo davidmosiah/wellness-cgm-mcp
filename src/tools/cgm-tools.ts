@@ -194,7 +194,7 @@ export function registerCgmTools(server: McpServer): void {
     {
       title: "CGM authorize URL",
       description:
-        "Builds the Dexcom OAuth authorize URL. The user opens it, grants access, and Dexcom redirects to your registered DEXCOM_REDIRECT_URI with an auth code.",
+        "Builds the Dexcom OAuth authorize URL. The user opens it, grants access, and Dexcom redirects to your registered DEXCOM_REDIRECT_URI with an auth code. If credentials are missing, returns a hint with the exact env vars needed.",
       inputSchema: {
         state: z.string().optional(),
       },
@@ -203,10 +203,110 @@ export function registerCgmTools(server: McpServer): void {
       const client = new DexcomClient();
       try {
         const url = client.buildAuthorizeUrl(state ?? "delx");
-        return jsonResponse({ ok: true, env: client.env, authorize_url: url });
+        return jsonResponse({
+          ok: true,
+          env: client.env,
+          authorize_url: url,
+          next: [
+            "Open the authorize_url in a browser.",
+            "Grant access to the Dexcom account.",
+            "Dexcom redirects to your DEXCOM_REDIRECT_URI with ?code=<auth_code>.",
+            "Copy that auth_code and run `wellness-cgm exchange <auth_code>` to swap it for an access_token.",
+          ],
+        });
       } catch (err) {
-        return jsonResponse({ ok: false, error: (err as Error).message });
+        return jsonResponse({
+          ok: false,
+          error: (err as Error).message,
+          hint: "Set DEXCOM_CLIENT_ID, DEXCOM_CLIENT_SECRET, DEXCOM_REDIRECT_URI in your env. Sign up at https://developer.dexcom.com (sandbox is free).",
+          recommended_redirect: "http://localhost:3012/callback (any URL works as long as you register it on developer.dexcom.com)",
+        });
       }
+    },
+  );
+
+  server.registerTool(
+    "cgm_quickstart",
+    {
+      title: "CGM quickstart",
+      description:
+        "Returns a personalized 3-step walkthrough for getting wellness-cgm-mcp from mock mode → live mode (Dexcom). Call this first when the user asks 'how do I connect my CGM?'",
+      inputSchema: {
+        client: z
+          .enum(["claude", "codex", "cursor", "windsurf", "hermes", "openclaw", "generic"])
+          .optional(),
+      },
+    },
+    async ({ client }) => {
+      const c = new DexcomClient();
+      const hasClientId = Boolean(c.clientId);
+      const hasToken = c.hasAuth();
+      return jsonResponse({
+        ok: true,
+        client: client ?? "generic",
+        current_mode: hasToken ? "live" : "mock",
+        env: c.env,
+        steps: [
+          {
+            step: 1,
+            title: hasClientId ? "(done) Dexcom Developer credentials configured" : "Sign up at https://developer.dexcom.com",
+            action: hasClientId
+              ? "DEXCOM_CLIENT_ID and DEXCOM_REDIRECT_URI are set."
+              : "Create a free account → create an app → register a redirect URI (use http://localhost:3012/callback for local dev). Then set DEXCOM_CLIENT_ID, DEXCOM_CLIENT_SECRET, DEXCOM_REDIRECT_URI in your env.",
+            done: hasClientId,
+          },
+          {
+            step: 2,
+            title: hasToken ? "(done) Access token already set — live mode is on" : "Run the OAuth dance",
+            action: hasToken
+              ? "DEXCOM_ACCESS_TOKEN is configured. All glucose tools return live data."
+              : "Call cgm_authorize_url to get the OAuth URL. Open it, grant access, copy the ?code=<auth_code> from the redirect. Then run `wellness-cgm exchange <auth_code>` to swap for tokens. Set DEXCOM_ACCESS_TOKEN to the access_token printed.",
+            done: hasToken,
+          },
+          {
+            step: 3,
+            title: "Verify with the agent",
+            action: "Call cgm_glucose_now or cgm_daily_summary. Without a real token, every tool clearly returns mock=true so you can prototype.",
+            example: "cgm_glucose_now() → { ok: true, mock: " + (hasToken ? "false" : "true") + ", latest: { mgdl: ..., timestamp: ... } }",
+            done: false,
+          },
+        ],
+        cross_connector_hints: [
+          "Pair cgm_meal_response with wellness-nourish meal logs to compute spike + band per meal.",
+          "Cross-reference glucose patterns with WHOOP recovery for metabolic-stress signals.",
+          "wellness-cycle-coach late-luteal phase + glucose spikes = good context for PMS-related insulin sensitivity changes.",
+        ],
+      });
+    },
+  );
+
+  server.registerTool(
+    "cgm_demo",
+    {
+      title: "CGM demo",
+      description:
+        "Returns realistic example payloads of cgm_glucose_now, cgm_daily_summary, and cgm_meal_response. Use this to help users see what the connector will return before configuring Dexcom.",
+      inputSchema: {},
+    },
+    async () => {
+      const sampleReadings = mockReadings(24, 95);
+      const summary = summarize(sampleReadings);
+      const mealResp = mealResponse(sampleReadings, new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString());
+      const latest = sampleReadings[sampleReadings.length - 1];
+      return jsonResponse({
+        ok: true,
+        is_demo: true,
+        sample: {
+          cgm_glucose_now: { ok: true, mock: true, latest },
+          cgm_daily_summary: { ok: true, mock: true, window_hours: 24, summary },
+          cgm_meal_response: { ok: true, mock: true, response: mealResp },
+        },
+        notes: [
+          "All sample data is synthetic (mock=true).",
+          `In live mode, set DEXCOM_ACCESS_TOKEN and the same tools return real Dexcom EGVs.`,
+          `Sample summary: mean=${summary.mean_mgdl} mg/dL, GMI=${summary.gmi_pct}% (estimated A1C), TIR(70-180)=${summary.diabetic_tir.in_range_pct}%.`,
+        ],
+      });
     },
   );
 }

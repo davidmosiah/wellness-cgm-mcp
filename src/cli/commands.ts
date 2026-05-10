@@ -78,6 +78,25 @@ function doctor(): number {
       detail: c.hasAuth() ? "present" : "missing — running in mock mode",
     },
   ];
+  const recommendations: string[] = [];
+  if (!c.clientId || !c.redirectUri) {
+    recommendations.push(
+      "Sign up at https://developer.dexcom.com (sandbox is free).",
+      "Create an app, register a redirect URI (suggestion: http://localhost:3012/callback).",
+      "Set DEXCOM_CLIENT_ID, DEXCOM_CLIENT_SECRET, DEXCOM_REDIRECT_URI in your env or MCP config.",
+    );
+  } else if (!c.hasAuth()) {
+    recommendations.push(
+      "Run `wellness-cgm authorize` to get the OAuth URL.",
+      "Open it, grant access, copy the ?code=<auth_code> from the redirect URL.",
+      "Run `wellness-cgm exchange <auth_code>` to swap for an access_token + refresh_token.",
+      "Set DEXCOM_ACCESS_TOKEN to the access_token. Mock mode flips to live automatically.",
+    );
+  } else {
+    recommendations.push(
+      "Live mode active. Try `wellness-cgm-mcp` over MCP and call cgm_glucose_now or cgm_daily_summary.",
+    );
+  }
   console.log(
     JSON.stringify(
       {
@@ -86,6 +105,7 @@ function doctor(): number {
         version: SERVER_VERSION,
         mode: c.hasAuth() ? "live" : "mock",
         checks,
+        recommendations,
         privacy: buildPrivacyAudit(),
         capabilities: buildCapabilities(),
       },

@@ -20,6 +20,8 @@ const TOOLS = [
   "cgm_connection_status",
   "cgm_privacy_audit",
   "cgm_data_inventory",
+  "cgm_quickstart",
+  "cgm_demo",
   "cgm_glucose_now",
   "cgm_glucose_window",
   "cgm_daily_summary",
@@ -61,7 +63,7 @@ export function buildAgentManifest(client: CgmAgentClient = "generic"): CgmAgent
         "WELLNESS_CGM_LOCAL_DIR",
       ],
     },
-    recommended_first_calls: ["cgm_connection_status", "cgm_capabilities", "cgm_glucose_now"],
+    recommended_first_calls: ["cgm_quickstart", "cgm_demo", "cgm_glucose_now"],
     tools: TOOLS,
     resources: [
       "wellness-cgm-mcp://agent-manifest",

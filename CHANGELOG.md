@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-10
+
+### Added
+
+- `cgm_quickstart` tool — returns a personalized 3-step walkthrough (sign up → OAuth dance → verify) based on the agent's current state (mock vs live mode, credentials present, etc.).
+- `cgm_demo` tool — returns realistic example payloads of `cgm_glucose_now`, `cgm_daily_summary`, and `cgm_meal_response` so agents see the contract before any real call.
+- `cgm_authorize_url` now returns a `next[]` step list explaining the OAuth flow, plus a `hint` + `recommended_redirect` when credentials are missing.
+- `doctor` CLI returns a `recommendations[]` array tailored to the current state (missing client_id vs missing token vs ready).
+
+### Changed
+
+- `recommended_first_calls` on the agent manifest now leads with `cgm_quickstart`.
+- Tool count: 10 → 12.
+
 ## [0.1.0] - 2026-05-10
 
 ### Added
