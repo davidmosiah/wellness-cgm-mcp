@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.davidmosiah/wellness-cgm-mcp",
+  "description": "Local-first continuous glucose monitor MCP for AI agents — Dexcom Developer API.",
+  "repository": {
+    "url": "https://github.com/davidmosiah/wellness-cgm-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "wellness-cgm-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ],
+  "websiteUrl": "https://wellness.delx.ai/connectors/cgm"
+}

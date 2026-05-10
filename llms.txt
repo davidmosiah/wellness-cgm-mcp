@@ -1,0 +1,54 @@
+# Wellness CGM MCP
+
+Local-first continuous glucose monitor MCP for AI agents. v0.1 ships against the official Dexcom Developer API (sandbox + production). FreeStyle Libre via LibreLink Up community proxy is roadmapped for v0.2. Mock-data mode lets agents demo every tool without any token.
+
+Repository: https://github.com/davidmosiah/wellness-cgm-mcp
+NPM: https://www.npmjs.com/package/wellness-cgm-mcp
+Docs: https://wellness.delx.ai/connectors/cgm
+Primary command: npx -y wellness-cgm-mcp doctor
+MCP command: wellness-cgm-mcp
+
+Core tools (10):
+- cgm_agent_manifest — runtime contract, supported clients, env vars
+- cgm_capabilities — providers, metrics, privacy modes
+- cgm_connection_status — env, credentials, mode (live vs mock)
+- cgm_privacy_audit — what is stored locally vs sent to Dexcom
+- cgm_data_inventory — metric catalog, TIR ranges, GMI formula reference
+- cgm_glucose_now — most recent EGV + trend
+- cgm_glucose_window — all EGVs over last N hours (default 24)
+- cgm_daily_summary — mean/median/min/max/stdev + GMI + CV + 2 TIR profiles
+- cgm_meal_response — baseline → peak → return-to-baseline + band (excellent/good/moderate/poor)
+- cgm_authorize_url — Dexcom OAuth authorize URL builder
+
+Optional env vars:
+- DEXCOM_ENV — sandbox (default) or production
+- DEXCOM_CLIENT_ID, DEXCOM_CLIENT_SECRET — from developer.dexcom.com
+- DEXCOM_REDIRECT_URI — must match exactly what you registered
+- DEXCOM_ACCESS_TOKEN — set after running `wellness-cgm exchange <auth_code>`; without it, mock mode is used
+- DEXCOM_REFRESH_TOKEN — used to refresh access tokens (refresh logic lands in v0.2)
+- WELLNESS_CGM_LOCAL_DIR — defaults to ~/.wellness-cgm
+- WELLNESS_CGM_QUIET=1 — suppress the stderr community CTA
+
+Workflow for agents:
+1. Call cgm_connection_status — check whether mode=live or mode=mock.
+2. cgm_glucose_now for spot checks; cgm_daily_summary for trends.
+3. cgm_meal_response with the meal_time from wellness-nourish to compute spike + band.
+4. Surface BOTH TIR profiles (diabetic 70-180 ADA + metabolic-health 70-140 Levels-style).
+5. NEVER recommend insulin/medication adjustments; defer to clinician.
+
+Time-in-range:
+- Diabetic profile: 70-180 mg/dL (ADA standard).
+- Metabolic-health profile: 70-140 mg/dL (Levels-style, for non-DM users).
+
+Meal response bands (peak delta from baseline):
+- excellent: < 30 mg/dL
+- good: 30-49
+- moderate: 50-79
+- poor: ≥ 80
+
+Safety:
+- CGM data is medical-record sensitive — treat accordingly.
+- Mock mode clearly tagged via mock=true on every payload.
+- Never claim diagnostic accuracy; readings are observed values.
+- For T1/T2 diabetics, defer dosing decisions to clinician.
+- Not affiliated with Dexcom or Abbott (FreeStyle Libre).
