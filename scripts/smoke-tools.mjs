@@ -16,6 +16,9 @@ const EXPECTED_TOOLS = new Set([
   "cgm_daily_summary",
   "cgm_meal_response",
   "cgm_authorize_url",
+  "cgm_profile_get",
+  "cgm_profile_update",
+  "cgm_onboarding",
 ]);
 
 const transport = new StdioClientTransport({

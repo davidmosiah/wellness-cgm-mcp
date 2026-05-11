@@ -10,6 +10,15 @@ import {
 import { buildAgentManifest } from "../services/agent-manifest.js";
 import { buildCapabilities } from "../services/capabilities.js";
 import { buildPrivacyAudit } from "../services/privacy-audit.js";
+import {
+  buildProfileSummary,
+  getOnboardingFlow,
+  getProfile,
+  getProfilePath,
+  missingCriticalFields,
+  updateProfile,
+  type WellnessProfileDocument,
+} from "../services/profile-store.js";
 
 function jsonResponse(payload: unknown) {
   return {
@@ -276,6 +285,91 @@ export function registerCgmTools(server: McpServer): void {
           "Cross-reference glucose patterns with WHOOP recovery for metabolic-stress signals.",
           "wellness-cycle-coach late-luteal phase + glucose spikes = good context for PMS-related insulin sensitivity changes.",
         ],
+      });
+    },
+  );
+
+  server.registerTool(
+    "cgm_profile_get",
+    {
+      title: "CGM profile get",
+      description:
+        "Returns the shared Delx Wellness profile (~/.delx-wellness/profile.json). Read-only. Surfaces diabetes status / non-DM context so wellness-cgm-mcp can pick the right time-in-range profile (70-180 ADA vs 70-140 metabolic-health).",
+      inputSchema: {},
+    },
+    async () => {
+      const profile = await getProfile();
+      return jsonResponse({
+        ok: true,
+        profile,
+        summary: buildProfileSummary(profile),
+        missing_critical: missingCriticalFields(profile),
+        storage_path: getProfilePath(),
+      });
+    },
+  );
+
+  server.registerTool(
+    "cgm_profile_update",
+    {
+      title: "CGM profile update",
+      description:
+        "Persist a partial patch to the shared Delx Wellness profile. Requires explicit_user_intent: true. Rejects any field containing oauth/token/secret/password/cookie/refresh/api_key/session — the profile is for non-secret wellness context only.",
+      inputSchema: {
+        patch: z
+          .record(z.string(), z.unknown())
+          .describe(
+            "Partial WellnessProfileDocument patch. Top-level keys: profile, goals, devices, training, nutrition, preferences, safety, notes.",
+          ),
+        explicit_user_intent: z
+          .boolean()
+          .optional()
+          .describe("Must be true. Pass only after the user explicitly asked to save/update profile data."),
+      },
+    },
+    async ({ patch, explicit_user_intent }) => {
+      if (explicit_user_intent !== true) {
+        return jsonResponse({
+          ok: false,
+          error: "USER_ACTION_REQUIRED",
+          message:
+            "explicit_user_intent must be true to update the shared wellness profile. Confirm with the user, then retry.",
+        });
+      }
+      try {
+        const profile = await updateProfile(patch as Partial<WellnessProfileDocument>);
+        return jsonResponse({
+          ok: true,
+          profile,
+          summary: buildProfileSummary(profile),
+          storage_path: getProfilePath(),
+        });
+      } catch (err) {
+        return jsonResponse({ ok: false, error: "update_failed", message: (err as Error).message });
+      }
+    },
+  );
+
+  server.registerTool(
+    "cgm_onboarding",
+    {
+      title: "CGM onboarding",
+      description:
+        "Returns the 11-question onboarding flow for the shared Delx Wellness profile. Read-only. The agent should ask these questions next so wellness-cgm-mcp (and the rest of the wellness stack) can personalize responses — non-secret data only, stored at ~/.delx-wellness/profile.json.",
+      inputSchema: {
+        locale: z.enum(["en", "pt-BR"]).optional().describe("Onboarding locale. Defaults to en."),
+      },
+    },
+    async ({ locale }) => {
+      const flow = getOnboardingFlow(locale ?? "en");
+      const profile = await getProfile();
+      return jsonResponse({
+        ok: true,
+        ...flow,
+        current_profile: profile,
+        missing_critical: missingCriticalFields(profile),
+        cross_connector_hint:
+          "wellness-cgm-mcp reads profile.safety.medical_constraints to decide which time-in-range profile to surface — diabetic (70-180 ADA) vs non-DM metabolic-health (70-140 Levels-style).",
       });
     },
   );

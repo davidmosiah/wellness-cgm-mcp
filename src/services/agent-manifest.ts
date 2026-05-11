@@ -16,17 +16,20 @@ const SUPPORTED_CLIENTS: CgmAgentClient[] = [
 
 const TOOLS = [
   "cgm_agent_manifest",
+  "cgm_authorize_url",
   "cgm_capabilities",
   "cgm_connection_status",
-  "cgm_privacy_audit",
+  "cgm_daily_summary",
   "cgm_data_inventory",
-  "cgm_quickstart",
   "cgm_demo",
   "cgm_glucose_now",
   "cgm_glucose_window",
-  "cgm_daily_summary",
   "cgm_meal_response",
-  "cgm_authorize_url",
+  "cgm_onboarding",
+  "cgm_privacy_audit",
+  "cgm_profile_get",
+  "cgm_profile_update",
+  "cgm_quickstart",
 ] as const;
 
 export interface CgmAgentManifest {
@@ -63,7 +66,7 @@ export function buildAgentManifest(client: CgmAgentClient = "generic"): CgmAgent
         "WELLNESS_CGM_LOCAL_DIR",
       ],
     },
-    recommended_first_calls: ["cgm_quickstart", "cgm_demo", "cgm_glucose_now"],
+    recommended_first_calls: ["cgm_profile_get", "cgm_quickstart", "cgm_glucose_now"],
     tools: TOOLS,
     resources: [
       "wellness-cgm-mcp://agent-manifest",

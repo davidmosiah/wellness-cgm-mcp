@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-11
+
+### Added
+
+- **Shared wellness profile support** — vendored canonical `profile-store` (Delx Wellness `ab83d1a`) at `src/services/profile-store.ts`. Reads/writes `~/.delx-wellness/profile.json` (the same file every Delx Wellness MCP can read).
+- `cgm_profile_get` MCP tool — returns the user's shared profile, one-line summary, and missing critical fields. Read-only.
+- `cgm_profile_update` MCP tool — persist a partial patch with `explicit_user_intent: true`. Rejects secret-like fields (oauth/token/secret/password/cookie/refresh/api_key/session).
+- `cgm_onboarding` MCP tool — returns the 11-question onboarding flow + the current profile + a cross-connector hint that profile feeds diabetes / non-DM context (which TIR profile to surface, 70-180 ADA vs 70-140 metabolic-health).
+- `wellness-cgm onboarding [pt-BR|en]` CLI command — emits the flow as JSON on stdout plus a TTY-gated Markdown walkthrough on stderr ("the agent will ask these 11 questions next — non-secret data only, stored at ~/.delx-wellness/profile.json").
+
+### Changed
+
+- Tool count: 12 → 15.
+- `recommended_first_calls` now leads with `cgm_profile_get` so agents fetch the user's diabetes context before choosing a TIR profile.
+
 ## [0.2.0] - 2026-05-10
 
 ### Added
