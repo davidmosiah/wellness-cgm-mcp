@@ -1,5 +1,5 @@
 export const SERVER_NAME = "wellness-cgm-mcp";
-export const SERVER_VERSION = "0.3.0";
+export const SERVER_VERSION = "0.3.1";
 export const NPM_PACKAGE_NAME = "wellness-cgm-mcp";
 export const PINNED_NPM_PACKAGE = `${NPM_PACKAGE_NAME}@${SERVER_VERSION}`;
 export const USER_AGENT = `${NPM_PACKAGE_NAME}/${SERVER_VERSION} (https://wellness.delx.ai/connectors/cgm; contact: david@delx.ai)`;
