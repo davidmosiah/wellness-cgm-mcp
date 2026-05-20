@@ -5,6 +5,7 @@ import {
   mealResponse,
   mockReadings,
   summarize,
+  timeInRangeWindow,
   type GlucoseReading,
 } from "../services/glucose-engine.js";
 import { buildAgentManifest } from "../services/agent-manifest.js";
@@ -172,6 +173,100 @@ export function registerCgmTools(server: McpServer): void {
       const { readings, mock } = await loadReadings(client, window);
       const summary = summarize(readings);
       return jsonResponse({ ok: true, mock, window_hours: window, summary });
+    },
+  );
+
+  server.registerTool(
+    "cgm_time_in_range",
+    {
+      title: "CGM time in range (windowed)",
+      description:
+        "Compute Time in Range (TIR), Time Below Range, and Time Above Range over a specific time window with a customizable target range. Use this for mealtime TIR (e.g. 7am-10am breakfast window), overnight TIR (e.g. 23:00-07:00), or specific date-range comparisons. Returns total_readings, readings_in_window, mean_glucose, median_glucose, and GMI (Glucose Management Indicator, estimated A1C per ADA / Bergenstal 2018: GMI% = 3.31 + 0.02392 × mean_mg_dL). Supports a `time_window` preset (\"wake\" = 06:00-22:00, \"sleep\" = 22:00-06:00, \"all\") OR explicit `start_hour` / `end_hour` (0-24, UTC) for recurring hour-of-day filtering. Defaults: 24h load, ADA 70-180 mg/dL, time_window=all. Pulls from cgm_glucose_window data; falls back to mock in unauth mode.",
+      inputSchema: {
+        start_time: z
+          .string()
+          .optional()
+          .describe("ISO-8601 timestamp of window start. Defaults to the earliest reading available."),
+        end_time: z
+          .string()
+          .optional()
+          .describe("ISO-8601 timestamp of window end. Defaults to the latest reading available."),
+        target_low: z
+          .number()
+          .min(40)
+          .max(200)
+          .optional()
+          .describe("Low end of target range in mg/dL. Default 70 (ADA)."),
+        target_high: z
+          .number()
+          .min(80)
+          .max(400)
+          .optional()
+          .describe("High end of target range in mg/dL. Default 180 (ADA)."),
+        hours: z
+          .number()
+          .int()
+          .min(1)
+          .max(72)
+          .optional()
+          .describe("How many hours of data to load before filtering. Default 24."),
+        time_window: z
+          .enum(["all", "wake", "sleep"])
+          .optional()
+          .describe(
+            'Hour-of-day preset. "wake" = 06:00-22:00, "sleep" = 22:00-06:00 (wraps midnight), "all" = no hour filter. Default "all". Overridden by explicit start_hour/end_hour.',
+          ),
+        start_hour: z
+          .number()
+          .min(0)
+          .max(24)
+          .optional()
+          .describe("Explicit recurring hour-of-day start (0-24, UTC). Use with end_hour to override time_window preset."),
+        end_hour: z
+          .number()
+          .min(0)
+          .max(24)
+          .optional()
+          .describe("Explicit recurring hour-of-day end (0-24, UTC). May be < start_hour to wrap midnight (e.g. 22→6)."),
+      },
+    },
+    async ({ start_time, end_time, target_low, target_high, hours, time_window, start_hour, end_hour }) => {
+      const client = new DexcomClient();
+      const loadHours = hours ?? 24;
+      const { readings, mock } = await loadReadings(client, loadHours);
+      try {
+        const tir = timeInRangeWindow(readings, {
+          start_time,
+          end_time,
+          low: target_low,
+          high: target_high,
+          time_window,
+          start_hour,
+          end_hour,
+        });
+        const notes: string[] = [];
+        if (tir.readings_in_window === 0) {
+          notes.push(
+            "No readings fell within the requested window. Widen start_time / end_time, load more hours, or relax the time_window/start_hour/end_hour filter.",
+          );
+        } else if (tir.readings_in_window < 12) {
+          notes.push(
+            `Small sample (${tir.readings_in_window} readings). TIR may not be statistically meaningful below ~12 EGVs.`,
+          );
+        }
+        return jsonResponse({
+          ok: true,
+          mock,
+          loaded_window_hours: loadHours,
+          requested_window: { start_time, end_time },
+          requested_time_window: time_window ?? (start_hour !== undefined && end_hour !== undefined ? "custom" : "all"),
+          target_range: { low: target_low ?? 70, high: target_high ?? 180 },
+          tir,
+          notes,
+        });
+      } catch (err) {
+        return jsonResponse({ ok: false, error: "invalid_window", message: (err as Error).message });
+      }
     },
   );
 

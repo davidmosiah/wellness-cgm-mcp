@@ -30,6 +30,7 @@ const TOOLS = [
   "cgm_profile_get",
   "cgm_profile_update",
   "cgm_quickstart",
+  "cgm_time_in_range",
 ] as const;
 
 export interface CgmAgentManifest {

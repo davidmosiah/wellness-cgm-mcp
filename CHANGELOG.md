@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-19
+
+### Added
+
+- **`cgm_time_in_range` MCP tool — TIR with explicit window + hour-of-day + target-range support.** Previously TIR was only available through `cgm_daily_summary` (whole-window, ADA 70-180 hard-coded). The new tool accepts:
+  - `start_time` / `end_time` (ISO-8601, optional — defaults to full data set) so the caller can compute TIR for mealtime windows (e.g. 7am-10am), overnight windows (e.g. 23:00-07:00), or arbitrary date-ranges.
+  - `target_low` / `target_high` (mg/dL, optional — defaults to 70-180 ADA) so the caller can compute tighter targets (e.g. 80-110 Levels-style metabolic-health).
+  - `hours` (1-72, optional — defaults to 24) controls how much data is loaded before filtering.
+  - `time_window` (`"all"` | `"wake"` | `"sleep"`) preset for recurring hour-of-day filtering. `"wake"` = 06:00-22:00, `"sleep"` = 22:00-06:00 (wraps midnight). Default `"all"`.
+  - Explicit `start_hour` / `end_hour` (0-24, UTC) for custom hour-of-day windows that override the preset — supports midnight-wrap ranges (e.g. 22→6).
+  Returns TIR%, time-below-range%, time-above-range%, AND new explicit numeric fields: `total_readings` (pre-filter), `readings_in_window`, `mean_glucose`, `median_glucose`, and `gmi` (Glucose Management Indicator / estimated A1C per ADA-Bergenstal 2018: `GMI(%) = 3.31 + 0.02392 × mean_mg_dL`). Helpful guidance note when the window is empty (`readings_in_window = 0`) or undersized (<12 readings) — empty windows no longer crash and consistently return zeros.
+- New `timeInRangeWindow()` pure function in `services/glucose-engine.ts` with `TimeWindowPreset` type and explicit hour-of-day resolver. Validated by 9 smoke assertions covering: full-window default, explicit 3-hour window, tight 80-110 target, ancient out-of-data window, explicit numeric fields, GMI formula accuracy via the tool, wake-vs-sleep preset split, custom `start_hour`/`end_hour`, and GMI sanity at known means (154 mg/dL, 183 mg/dL).
+- Tool count: 15 → 16.
+
+### Changed
+
+- `TimeInRangeWindowResult` extended with `total_readings`, `readings_in_window`, `mean_glucose`, `median_glucose`, `gmi`, and `hour_of_day_filter`. Existing `count` / `in_range_pct` / `below_pct` / `above_pct` / `range` / `buckets` fields preserved for backwards compatibility.
+
 ## [0.3.1] - 2026-05-11
 
 ### Fixed
