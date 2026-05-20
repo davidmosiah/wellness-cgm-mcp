@@ -87,6 +87,7 @@ npx -y wellness-cgm-mcp exchange <auth_code_from_redirect>
 | **`cgm_daily_summary`** | **Mean / GMI / CV / 2 TIR profiles** |
 | **`cgm_meal_response`** | **Baseline → peak → return + band** |
 | `cgm_authorize_url` | Dexcom OAuth URL builder |
+| **`cgm_hypo_events`** | **Hypo event detection (ADA Level 1 < 70, Level 2 < 54) — v0.3.3** |
 
 ## Two Time-In-Range profiles in every summary
 

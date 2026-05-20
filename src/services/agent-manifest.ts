@@ -24,6 +24,7 @@ const TOOLS = [
   "cgm_demo",
   "cgm_glucose_now",
   "cgm_glucose_window",
+  "cgm_hypo_events",
   "cgm_meal_response",
   "cgm_onboarding",
   "cgm_privacy_audit",
@@ -80,6 +81,7 @@ export function buildAgentManifest(client: CgmAgentClient = "generic"): CgmAgent
       "Surface the time-in-range profile being used (diabetic 70-180 vs metabolic-health 70-140).",
       "When meal_response band is 'poor', cross-reference the meal in wellness-nourish and suggest a swap.",
       "Treat CGM data as medical-record sensitive. Defer insulin / medication dosing to clinician.",
+      "Hypo events (cgm_hypo_events) always include a MEDICAL DISCLAIMER — never use the output for treatment decisions; defer to the user's clinician.",
       "Never claim diagnostic accuracy.",
     ],
     community: {

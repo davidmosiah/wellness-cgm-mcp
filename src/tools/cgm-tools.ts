@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DexcomClient } from "../services/dexcom-client.js";
 import {
+  detectHypoEvents,
   mealResponse,
   mockReadings,
   summarize,
@@ -119,6 +120,12 @@ export function registerCgmTools(server: McpServer): void {
           { band: "moderate", peak_delta_mgdl: "50-79" },
           { band: "poor", peak_delta_mgdl: "≥ 80" },
         ],
+        hypo_thresholds: {
+          level_1_mg_dl: 70,
+          level_2_mg_dl: 54,
+          min_duration_minutes: 15,
+          source: "ADA Standards of Care — Level 1 is alert value, Level 2 is clinically significant.",
+        },
       }),
   );
 
@@ -154,6 +161,86 @@ export function registerCgmTools(server: McpServer): void {
       const window = hours ?? 24;
       const { readings, mock } = await loadReadings(client, window);
       return jsonResponse({ ok: true, mock, hours: window, count: readings.length, readings });
+    },
+  );
+
+  server.registerTool(
+    "cgm_hypo_events",
+    {
+      title: "CGM hypo events",
+      description:
+        "v0.3.3 — Detect hypoglycemia events between `from` and `to` ISO dates. Returns an array of contiguous below-threshold runs lasting ≥ `min_duration_minutes`, each with `started_at`, `ended_at`, `duration_minutes`, `min_glucose_mg_dl`, `mean_glucose_mg_dl`, `severity` (level_1 = <70 ADA Level 1, level_2 = <54 ADA Level 2), and `recovery_time_minutes` (time to first reading ≥ threshold+10). Also returns `total_events`, `total_minutes_below`, `mean_min_glucose`, `events_per_day`, a `summary` string, and `recommendations` grounded in what was actually observed. **MEDICAL DISCLAIMER: NOT medical advice. Do not use for treatment decisions. Hypo events should be discussed with your clinician.**",
+      inputSchema: {
+        from: z.string().describe("ISO-8601 timestamp / date of the analysis window start."),
+        to: z.string().describe("ISO-8601 timestamp / date of the analysis window end."),
+        threshold_mg_dl: z
+          .number()
+          .min(40)
+          .max(100)
+          .optional()
+          .describe("Hypo threshold in mg/dL. Default 70 (ADA Level 1)."),
+        severe_threshold_mg_dl: z
+          .number()
+          .min(40)
+          .max(80)
+          .optional()
+          .describe("Severe hypo threshold in mg/dL. Default 54 (ADA Level 2)."),
+        min_duration_minutes: z
+          .number()
+          .int()
+          .min(1)
+          .max(120)
+          .optional()
+          .describe("Minimum contiguous-minutes-below-threshold to count as an event. Default 15."),
+        response_format: z
+          .enum(["structured", "summary"])
+          .optional()
+          .describe('Output shape. "structured" (default) returns the full event array. "summary" omits the per-event array, keeping totals + summary + recommendations.'),
+      },
+    },
+    async ({ from, to, threshold_mg_dl, severe_threshold_mg_dl, min_duration_minutes, response_format }) => {
+      const client = new DexcomClient();
+      const startMs = new Date(from).getTime();
+      const endMs = new Date(to).getTime();
+      if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+        return jsonResponse({ ok: false, error: "invalid_window", message: "from / to must be ISO-8601 timestamps" });
+      }
+      if (endMs <= startMs) {
+        return jsonResponse({ ok: false, error: "invalid_window", message: "to must be after from" });
+      }
+      let readings: GlucoseReading[];
+      let mock: boolean;
+      if (!client.hasAuth()) {
+        const spanHours = Math.max(1, Math.ceil((endMs - startMs) / (60 * 60 * 1000)));
+        readings = mockReadings(Math.min(spanHours, 72));
+        mock = true;
+      } else {
+        readings = await client.getEgvs(new Date(startMs).toISOString(), new Date(endMs).toISOString());
+        mock = false;
+      }
+      try {
+        const result = detectHypoEvents(readings, {
+          threshold_mg_dl,
+          severe_threshold_mg_dl,
+          min_duration_minutes,
+          from,
+          to,
+        });
+        const payload: Record<string, unknown> = {
+          ok: true,
+          mock,
+          window: { from, to },
+          medical_disclaimer:
+            "NOT medical advice. Do not use for treatment decisions. Hypo events should be discussed with your clinician.",
+          ...result,
+        };
+        if (response_format === "summary") {
+          delete (payload as Record<string, unknown>).events;
+        }
+        return jsonResponse(payload);
+      } catch (err) {
+        return jsonResponse({ ok: false, error: "invalid_window", message: (err as Error).message });
+      }
     },
   );
 

@@ -340,6 +340,182 @@ function stdev(arr: number[], mean: number): number {
   return Math.sqrt(sq);
 }
 
+export interface HypoEvent {
+  /** ISO timestamp of first reading below threshold that started the event. */
+  started_at: string;
+  /** ISO timestamp of last reading that was still below threshold (event end). */
+  ended_at: string;
+  /** Total duration in minutes (inclusive of start, exclusive of end+1). */
+  duration_minutes: number;
+  /** Lowest mg/dL observed during the event. */
+  min_glucose_mg_dl: number;
+  /** Mean mg/dL across all in-event readings. */
+  mean_glucose_mg_dl: number;
+  /** ADA Level 1 (<70) → "level_1" ; Level 2 (<54) → "level_2". */
+  severity: "level_1" | "level_2";
+  /**
+   * Minutes from end-of-event until the first reading ≥ threshold + 10 mg/dL.
+   * null when we never see a recovery reading inside the loaded data.
+   */
+  recovery_time_minutes: number | null;
+}
+
+export interface HypoEventsResult {
+  events: HypoEvent[];
+  total_events: number;
+  total_minutes_below: number;
+  mean_min_glucose: number;
+  events_per_day: number;
+  summary: string;
+  recommendations: string[];
+  thresholds: { level_1_mg_dl: number; level_2_mg_dl: number };
+  min_duration_minutes: number;
+  observed_window: { start: string | null; end: string | null; days: number };
+}
+
+/**
+ * v0.3.3 — Detect hypoglycemia events from a stream of CGM readings.
+ *
+ * Per ADA standards:
+ *   Level 1 hypo = < 70 mg/dL (alert value)
+ *   Level 2 hypo = < 54 mg/dL (clinically significant)
+ *
+ * An "event" is a contiguous run of readings below `threshold_mg_dl` lasting
+ * at least `min_duration_minutes`. Severity reflects the lowest mg/dL during
+ * the event (level_2 if it ever crossed the severe threshold, else level_1).
+ *
+ * Recovery time = minutes from event end to the first reading ≥ threshold + 10
+ * (matches the "out of hypo" definition used in DPP and ADA TIR reporting).
+ */
+export function detectHypoEvents(
+  readings: GlucoseReading[],
+  options: {
+    threshold_mg_dl?: number;
+    severe_threshold_mg_dl?: number;
+    min_duration_minutes?: number;
+    from?: string;
+    to?: string;
+  } = {},
+): HypoEventsResult {
+  const threshold = options.threshold_mg_dl ?? 70;
+  const severe = options.severe_threshold_mg_dl ?? 54;
+  const minDuration = options.min_duration_minutes ?? 15;
+  const fromMs = options.from ? new Date(options.from).getTime() : -Infinity;
+  const toMs = options.to ? new Date(options.to).getTime() : Infinity;
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
+    throw new Error("Invalid from / to — must be ISO-8601 timestamps");
+  }
+  const inRange = readings
+    .filter((r) => {
+      const t = new Date(r.timestamp).getTime();
+      return Number.isFinite(t) && t >= fromMs && t <= toMs;
+    })
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  const events: HypoEvent[] = [];
+  let current: GlucoseReading[] = [];
+
+  const flush = (idx: number) => {
+    if (current.length === 0) return;
+    const first = current[0];
+    const last = current[current.length - 1];
+    const startMs = new Date(first.timestamp).getTime();
+    const endMs = new Date(last.timestamp).getTime();
+    const durationMin = Math.round((endMs - startMs) / 60_000);
+    if (durationMin >= minDuration) {
+      const min = current.reduce((m, r) => Math.min(m, r.mgdl), current[0].mgdl);
+      const mean = current.reduce((s, r) => s + r.mgdl, 0) / current.length;
+      // Recovery: first reading after end with mgdl >= threshold + 10
+      const recoveryTarget = threshold + 10;
+      let recoveryMin: number | null = null;
+      for (let j = idx; j < inRange.length; j++) {
+        if (inRange[j].mgdl >= recoveryTarget) {
+          recoveryMin = Math.round((new Date(inRange[j].timestamp).getTime() - endMs) / 60_000);
+          break;
+        }
+      }
+      events.push({
+        started_at: first.timestamp,
+        ended_at: last.timestamp,
+        duration_minutes: durationMin,
+        min_glucose_mg_dl: round1(min),
+        mean_glucose_mg_dl: round1(mean),
+        severity: min < severe ? "level_2" : "level_1",
+        recovery_time_minutes: recoveryMin,
+      });
+    }
+    current = [];
+  };
+
+  for (let i = 0; i < inRange.length; i++) {
+    const r = inRange[i];
+    if (r.mgdl < threshold) {
+      current.push(r);
+    } else if (current.length > 0) {
+      flush(i);
+    }
+  }
+  // Tail event still open at the end of the window
+  flush(inRange.length);
+
+  const totalMinutes = events.reduce((s, e) => s + e.duration_minutes, 0);
+  const minGlucoses = events.map((e) => e.min_glucose_mg_dl);
+  const meanMin = minGlucoses.length === 0 ? 0 : round1(minGlucoses.reduce((a, b) => a + b, 0) / minGlucoses.length);
+
+  const observedStart = inRange[0]?.timestamp ?? null;
+  const observedEnd = inRange[inRange.length - 1]?.timestamp ?? null;
+  const observedDays = observedStart && observedEnd
+    ? Math.max(1, Math.round((new Date(observedEnd).getTime() - new Date(observedStart).getTime()) / 86_400_000)) || 1
+    : 0;
+  const eventsPerDay = observedDays > 0 ? round2(events.length / observedDays) : 0;
+
+  // Build summary + recommendations grounded in what we actually saw.
+  const level2Count = events.filter((e) => e.severity === "level_2").length;
+  const level1Count = events.length - level2Count;
+  const summary =
+    events.length === 0
+      ? `No hypoglycemia events detected at threshold ${threshold} mg/dL (≥ ${minDuration} min) across ${inRange.length} readings.`
+      : `${events.length} hypo event(s) detected at threshold ${threshold} mg/dL: ${level1Count} Level 1 (<${threshold}), ${level2Count} Level 2 (<${severe}). Total ${totalMinutes} min below range, mean nadir ${meanMin} mg/dL, ${eventsPerDay}/day.`;
+
+  const recommendations: string[] = [];
+  if (events.length === 0) {
+    if (inRange.length > 0) recommendations.push("No hypos detected — keep doing what you're doing.");
+  } else {
+    if (level2Count > 0) {
+      recommendations.push(
+        `${level2Count} Level 2 event(s) (< ${severe} mg/dL) detected. Level 2 hypos are clinically significant — review with your clinician.`,
+      );
+    }
+    if (eventsPerDay >= 1) {
+      recommendations.push(
+        `Hypo frequency is ${eventsPerDay}/day. Pattern-check around insulin timing, exercise, alcohol, and meal composition.`,
+      );
+    }
+    const recoveries = events.map((e) => e.recovery_time_minutes).filter((v): v is number => v !== null);
+    if (recoveries.length > 0) {
+      const meanRecovery = Math.round(recoveries.reduce((a, b) => a + b, 0) / recoveries.length);
+      if (meanRecovery > 30) {
+        recommendations.push(
+          `Mean recovery time is ${meanRecovery} min. Slow recoveries may indicate under-treatment of hypos — discuss correction strategy with your clinician.`,
+        );
+      }
+    }
+  }
+
+  return {
+    events,
+    total_events: events.length,
+    total_minutes_below: totalMinutes,
+    mean_min_glucose: meanMin,
+    events_per_day: eventsPerDay,
+    summary,
+    recommendations,
+    thresholds: { level_1_mg_dl: threshold, level_2_mg_dl: severe },
+    min_duration_minutes: minDuration,
+    observed_window: { start: observedStart, end: observedEnd, days: observedDays },
+  };
+}
+
 /**
  * Generate sample readings simulating a Dexcom 5-minute interval over the last N hours.
  * Used in mock mode when no Dexcom token is configured.

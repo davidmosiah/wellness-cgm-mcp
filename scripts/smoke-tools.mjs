@@ -5,20 +5,21 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const EXPECTED_TOOLS = new Set([
   "cgm_agent_manifest",
+  "cgm_authorize_url",
   "cgm_capabilities",
   "cgm_connection_status",
-  "cgm_privacy_audit",
+  "cgm_daily_summary",
   "cgm_data_inventory",
-  "cgm_quickstart",
   "cgm_demo",
   "cgm_glucose_now",
   "cgm_glucose_window",
-  "cgm_daily_summary",
+  "cgm_hypo_events",
   "cgm_meal_response",
-  "cgm_authorize_url",
+  "cgm_onboarding",
+  "cgm_privacy_audit",
   "cgm_profile_get",
   "cgm_profile_update",
-  "cgm_onboarding",
+  "cgm_quickstart",
   "cgm_time_in_range",
 ]);
 
@@ -248,6 +249,110 @@ const gmi183 = Math.round((3.31 + 0.02392 * 183) * 100) / 100;
 assert.equal(gmi154, 6.99, `GMI at 154 mg/dL should be 6.99 (got ${gmi154})`);
 assert.ok(gmi183 >= 7.6 && gmi183 <= 7.75, `GMI at 183 mg/dL should be ~7.68 (got ${gmi183})`);
 console.log(`✓ GMI formula (ADA Bergenstal 2018): mean=154→GMI=${gmi154}, mean=183→GMI=${gmi183}`);
+
+// --- cgm_hypo_events: registered, returns medical_disclaimer, schema-correct ---
+const hypoSmoke = JSON.parse(
+  (
+    await client.callTool({
+      name: "cgm_hypo_events",
+      arguments: {
+        from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        to: new Date().toISOString(),
+      },
+    })
+  ).content[0].text,
+);
+assert.equal(hypoSmoke.ok, true, `hypo events tool not ok: ${JSON.stringify(hypoSmoke)}`);
+assert.ok(typeof hypoSmoke.medical_disclaimer === "string", "medical_disclaimer should be a string");
+assert.ok(/NOT medical advice/i.test(hypoSmoke.medical_disclaimer), "disclaimer should warn NOT medical advice");
+assert.ok(Array.isArray(hypoSmoke.events), "events should be an array");
+assert.equal(typeof hypoSmoke.total_events, "number");
+assert.equal(typeof hypoSmoke.total_minutes_below, "number");
+assert.equal(typeof hypoSmoke.mean_min_glucose, "number");
+assert.equal(typeof hypoSmoke.events_per_day, "number");
+assert.equal(typeof hypoSmoke.summary, "string");
+assert.ok(Array.isArray(hypoSmoke.recommendations));
+assert.equal(hypoSmoke.thresholds.level_1_mg_dl, 70);
+assert.equal(hypoSmoke.thresholds.level_2_mg_dl, 54);
+console.log(`✓ cgm_hypo_events registered + medical_disclaimer present (total_events=${hypoSmoke.total_events})`);
+
+// --- cgm_hypo_events: response_format="summary" drops events array ---
+const hypoSummary = JSON.parse(
+  (
+    await client.callTool({
+      name: "cgm_hypo_events",
+      arguments: {
+        from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        to: new Date().toISOString(),
+        response_format: "summary",
+      },
+    })
+  ).content[0].text,
+);
+assert.equal(hypoSummary.ok, true);
+assert.equal(hypoSummary.events, undefined, "response_format=summary should drop events array");
+console.log("✓ cgm_hypo_events response_format=summary drops events array");
+
+// --- cgm_hypo_events: invalid window rejected ---
+const hypoBad = JSON.parse(
+  (
+    await client.callTool({
+      name: "cgm_hypo_events",
+      arguments: { from: "not-a-date", to: new Date().toISOString() },
+    })
+  ).content[0].text,
+);
+assert.equal(hypoBad.ok, false, "invalid from should be rejected");
+console.log("✓ cgm_hypo_events rejects invalid window");
+
+// --- detectHypoEvents pure-function test: synthetic stream with known events ---
+const { detectHypoEvents } = await import("../dist/services/glucose-engine.js");
+const synth = [];
+const t0 = Date.parse("2026-05-01T00:00:00Z");
+function r(min, mg) { synth.push({ timestamp: new Date(t0 + min * 60_000).toISOString(), mgdl: mg }); }
+// 00:00 - 00:30 normal (in range)
+for (let m = 0; m <= 30; m += 5) r(m, 95);
+// 00:35 - 00:55 Level 1 hypo lasting 20 min (5 readings at 5-min intervals: 35,40,45,50,55)
+for (let m = 35; m <= 55; m += 5) r(m, 65);
+// 01:00 - 01:30 recovery — back in range
+for (let m = 60; m <= 90; m += 5) r(m, 105);
+// 02:00 - 02:18 Level 2 hypo lasting 18 min (~4 readings starting at 120: 120,125,130,135,138)
+for (const m of [120, 125, 130, 135, 138]) r(m, 50);
+// 02:20 - 03:00 recovery again
+for (let m = 140; m <= 180; m += 5) r(m, 110);
+// 03:10 brief 10-min spike below 70 (should NOT count — too short for default 15-min min)
+for (const m of [190, 195, 200]) r(m, 65); // 10 minute span = does NOT meet min_duration_minutes default
+for (let m = 205; m <= 240; m += 5) r(m, 100);
+
+const detected = detectHypoEvents(synth, {
+  from: "2026-05-01T00:00:00Z",
+  to: "2026-05-01T04:00:00Z",
+});
+assert.equal(detected.total_events, 2, `expected 2 events (Level 1 + Level 2), got ${detected.total_events}`);
+assert.equal(detected.events[0].severity, "level_1", `first event should be level_1, got ${detected.events[0].severity}`);
+assert.equal(detected.events[0].duration_minutes, 20, `first event duration 20 min, got ${detected.events[0].duration_minutes}`);
+assert.equal(detected.events[1].severity, "level_2", `second event should be level_2, got ${detected.events[1].severity}`);
+assert.equal(detected.events[1].duration_minutes, 18, `second event duration 18 min, got ${detected.events[1].duration_minutes}`);
+assert.equal(detected.events[0].min_glucose_mg_dl, 65);
+assert.equal(detected.events[1].min_glucose_mg_dl, 50);
+// Recovery: after first hypo (last reading 00:55 at 65), recovery target = 70+10=80, first reading at 01:00 is 105 → 5 min
+assert.equal(detected.events[0].recovery_time_minutes, 5);
+console.log(`✓ detectHypoEvents synthetic: 2 events (level_1 20min, level_2 18min); 10-min spike correctly ignored`);
+
+// Edge: 10-min spike forced down to count → with min_duration_minutes=5 it should count
+const detectedShort = detectHypoEvents(synth, {
+  from: "2026-05-01T00:00:00Z",
+  to: "2026-05-01T04:00:00Z",
+  min_duration_minutes: 5,
+});
+assert.ok(detectedShort.total_events >= 3, `with min_duration=5 should now catch the brief spike (got ${detectedShort.total_events})`);
+console.log(`✓ detectHypoEvents min_duration_minutes=5 catches the brief 10-min spike (total=${detectedShort.total_events})`);
+
+// Edge: empty stream
+const empty = detectHypoEvents([], { from: "2026-05-01T00:00:00Z", to: "2026-05-02T00:00:00Z" });
+assert.equal(empty.total_events, 0);
+assert.ok(/No hypoglycemia events detected/i.test(empty.summary));
+console.log("✓ detectHypoEvents empty stream → 0 events + clean summary");
 
 await client.close();
 console.log("\nall smoke checks passed.");

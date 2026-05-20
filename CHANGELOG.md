@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-20
+
+### Added
+
+- **`cgm_hypo_events` MCP tool — hypoglycemia event detection from CGM readings.** Returns contiguous below-threshold runs lasting ≥ `min_duration_minutes` as discrete events, each with `started_at`, `ended_at`, `duration_minutes`, `min_glucose_mg_dl`, `mean_glucose_mg_dl`, `severity` (`level_1` < 70 ADA Level 1; `level_2` < 54 ADA Level 2), and `recovery_time_minutes` (minutes from event end to first reading ≥ threshold + 10). Also returns `total_events`, `total_minutes_below`, `mean_min_glucose`, `events_per_day`, a `summary` string, and `recommendations` grounded in what was actually observed (level_2 count, daily frequency, slow recovery). Every response carries a prominent `medical_disclaimer`: *"NOT medical advice. Do not use for treatment decisions. Hypo events should be discussed with your clinician."*
+- Inputs: `from` (ISO), `to` (ISO), `threshold_mg_dl` (default 70), `severe_threshold_mg_dl` (default 54), `min_duration_minutes` (default 15), `response_format` (`"structured"` default | `"summary"` omits event array).
+- New pure function `detectHypoEvents()` in `services/glucose-engine.ts`. Validated by synthetic 5-minute-interval glucose streams: a 20-min Level 1 event, an 18-min Level 2 event, and a 10-min spike that correctly does NOT count.
+- `cgm_data_inventory` now surfaces `hypo_thresholds` (level 1 = 70 mg/dL, level 2 = 54 mg/dL, min duration 15 min, ADA source).
+- `cgm_capabilities` adds `hypo_events_level_1`, `hypo_events_level_2`, `minutes_below_threshold`, `recovery_time_minutes` to the metric catalog.
+- New agent_rule documenting the medical-disclaimer requirement for `cgm_hypo_events`.
+- Tool count: 16 → 17.
+
 ## [0.3.2] - 2026-05-19
 
 ### Added
