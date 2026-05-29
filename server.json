@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.davidmosiah/wellness-cgm-mcp",
-  "description": "Local-first continuous glucose monitor MCP for AI agents — Dexcom Developer API + FreeStyle Libre via LibreLink Up.",
+  "description": "Local-first CGM MCP for AI agents: Dexcom Developer API + FreeStyle Libre via LibreLink Up.",
   "repository": {
     "url": "https://github.com/davidmosiah/wellness-cgm-mcp",
     "source": "github"
