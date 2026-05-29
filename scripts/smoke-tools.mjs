@@ -14,6 +14,8 @@ const EXPECTED_TOOLS = new Set([
   "cgm_glucose_now",
   "cgm_glucose_window",
   "cgm_hypo_events",
+  "cgm_libre_login",
+  "cgm_libre_status",
   "cgm_meal_response",
   "cgm_onboarding",
   "cgm_privacy_audit",
@@ -353,6 +355,109 @@ const empty = detectHypoEvents([], { from: "2026-05-01T00:00:00Z", to: "2026-05-
 assert.equal(empty.total_events, 0);
 assert.ok(/No hypoglycemia events detected/i.test(empty.summary));
 console.log("✓ detectHypoEvents empty stream → 0 events + clean summary");
+
+// --- FreeStyle Libre (LibreLink Up): tools register + mock mode returns data ---
+const libreStatus = JSON.parse(
+  (await client.callTool({ name: "cgm_libre_status", arguments: {} })).content[0].text,
+);
+assert.equal(libreStatus.ok, true);
+assert.equal(libreStatus.provider, "libre");
+assert.equal(libreStatus.mode, "mock", "no LibreLink Up creds in CI → mock mode");
+assert.ok(Array.isArray(libreStatus.env_vars) && libreStatus.env_vars.includes("LIBRELINKUP_EMAIL"));
+console.log(`✓ cgm_libre_status registered (mode=${libreStatus.mode}, region=${libreStatus.region})`);
+
+const libreLogin = JSON.parse(
+  (await client.callTool({ name: "cgm_libre_login", arguments: {} })).content[0].text,
+);
+assert.equal(libreLogin.ok, true);
+assert.equal(libreLogin.provider, "libre");
+assert.equal(libreLogin.mock, true, "no creds → mock connection");
+assert.ok(Array.isArray(libreLogin.connections) && libreLogin.connections.length >= 1);
+assert.ok(
+  libreLogin.connections[0].latest && libreLogin.connections[0].latest.mgdl > 40,
+  "mock connection should carry a synthetic latest reading",
+);
+console.log(`✓ cgm_libre_login (mock) returns ${libreLogin.connections.length} connection w/ latest reading`);
+
+// --- LibreLinkUpClient: parse a realistic LibreLink Up graph payload end-to-end ---
+// Stub fetch with the exact shape Abbott's /llu/connections/{id}/graph returns,
+// proving the client maps US-locale timestamps + ValueInMgPerDl into GlucoseReadings
+// that flow through the shared ADA TIR / GMI engine — without a real Abbott account.
+const { LibreLinkUpClient } = await import("../dist/services/librelink-client.js");
+const { summarize: summarizeEngine, timeInRangeWindow: tirEngine } = await import(
+  "../dist/services/glucose-engine.js"
+);
+
+function makeLibrePoint(minAgo, mg) {
+  const d = new Date(Date.now() - minAgo * 60_000);
+  // LibreLink Up emits US-locale "MM/DD/YYYY h:mm:ss AM/PM" (sensor-local).
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const yyyy = d.getUTCFullYear();
+  let h = d.getUTCHours();
+  const ampm = h >= 12 ? "PM" : "AM";
+  let h12 = h % 12;
+  if (h12 === 0) h12 = 12;
+  const min = String(d.getUTCMinutes()).padStart(2, "0");
+  const sec = String(d.getUTCSeconds()).padStart(2, "0");
+  return { Timestamp: `${mm}/${dd}/${yyyy} ${h12}:${min}:${sec} ${ampm}`, ValueInMgPerDl: mg, TrendArrow: 3 };
+}
+
+const graphData = [];
+for (let i = 96; i >= 1; i--) graphData.push(makeLibrePoint(i * 5, 90 + (i % 7) * 6)); // ~8h of 5-min points
+const fakeFetch = async (url) => {
+  const u = String(url);
+  if (u.includes("/llu/auth/login")) {
+    return new Response(
+      JSON.stringify({ status: 0, data: { authTicket: { token: "FAKE.JWT.TOKEN", expires: 0 }, user: { id: "acct-123" } } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+  if (u.includes("/llu/connections/") && u.includes("/graph")) {
+    return new Response(
+      JSON.stringify({
+        data: {
+          connection: { glucoseMeasurement: makeLibrePoint(0, 132) },
+          graphData,
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+  if (u.includes("/llu/connections")) {
+    return new Response(
+      JSON.stringify({ data: [{ patientId: "patient-xyz", firstName: "Real", lastName: "User" }] }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+  throw new Error(`unexpected URL ${u}`);
+};
+
+const stubbed = new LibreLinkUpClient({
+  email: "demo@example.com",
+  password: "x",
+  patientId: "patient-xyz",
+  fetchImpl: fakeFetch,
+});
+const libreAuth = await stubbed.login();
+assert.equal(libreAuth.token, "FAKE.JWT.TOKEN", "login should parse the auth ticket token");
+const libreReadings = await stubbed.getGraph();
+assert.ok(libreReadings.length >= 96, `graph should parse all points (got ${libreReadings.length})`);
+for (const r of libreReadings) {
+  assert.ok(Number.isFinite(r.mgdl) && r.mgdl > 0, `mgdl parsed: ${r.mgdl}`);
+  assert.ok(!Number.isNaN(Date.parse(r.timestamp)), `timestamp parsed to ISO: ${r.timestamp}`);
+}
+const current = await stubbed.getCurrent();
+assert.equal(current.mgdl, 132, `getCurrent should be the connection measurement (got ${current?.mgdl})`);
+// The whole point: Libre readings flow through the SAME ADA engine as Dexcom.
+const libreSummary = summarizeEngine(libreReadings);
+assert.ok(libreSummary.gmi_pct > 0, "GMI computed from Libre readings");
+assert.ok(libreSummary.diabetic_tir.count === libreReadings.length, "TIR counts all Libre readings");
+const libreTir = tirEngine(libreReadings, {});
+assert.ok(libreTir.mean_glucose > 0 && libreTir.gmi > 0, "windowed TIR/GMI computed from Libre readings");
+console.log(
+  `✓ LibreLinkUpClient parses graph end-to-end: ${libreReadings.length} readings → mean=${libreSummary.mean_mgdl} mg/dL, GMI=${libreSummary.gmi_pct}%, TIR(70-180)=${libreSummary.diabetic_tir.in_range_pct}% (shared ADA engine)`,
+);
 
 await client.close();
 console.log("\nall smoke checks passed.");

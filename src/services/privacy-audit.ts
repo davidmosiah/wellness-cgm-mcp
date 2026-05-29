@@ -12,8 +12,9 @@ export function buildPrivacyAudit(): CgmPrivacyAudit {
   return {
     local_storage: `~/${LOCAL_DIR_NAME}`,
     outbound_destinations: [
-      "sandbox-api.dexcom.com (sandbox testing)",
-      "api.dexcom.com (production user data)",
+      "sandbox-api.dexcom.com (Dexcom sandbox testing)",
+      "api.dexcom.com (Dexcom production user data)",
+      "api.libreview.io / api-<region>.libreview.io (FreeStyle Libre via LibreLink Up, when CGM_PROVIDER=libre)",
     ],
     what_is_logged: [
       "Last fetched glucose readings cached locally to support offline replies and reduce API rate-limit pressure.",

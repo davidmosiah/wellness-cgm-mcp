@@ -1,6 +1,6 @@
 # Wellness CGM MCP
 
-Local-first continuous glucose monitor MCP for AI agents. v0.1 ships against the official Dexcom Developer API (sandbox + production). FreeStyle Libre via LibreLink Up community proxy is roadmapped for v0.2. Mock-data mode lets agents demo every tool without any token.
+Local-first continuous glucose monitor MCP for AI agents. Two real backends: Dexcom (official Developer API, sandbox + production) and FreeStyle Libre — the OTC sensor (Libre 2 / Libre 3) — via LibreLink Up. Pick the backend with CGM_PROVIDER (dexcom | libre); it auto-detects libre when only LIBRELINKUP_* creds are set. Both feed the same ADA TIR / GMI / hypo / meal-response engine. Mock-data mode lets agents demo every tool without any credentials.
 
 Repository: https://github.com/davidmosiah/wellness-cgm-mcp
 NPM: https://www.npmjs.com/package/wellness-cgm-mcp
@@ -8,29 +8,37 @@ Docs: https://wellness.delx.ai/connectors/cgm
 Primary command: npx -y wellness-cgm-mcp doctor
 MCP command: wellness-cgm-mcp
 
-Core tools (10):
+Core tools:
 - cgm_agent_manifest — runtime contract, supported clients, env vars
-- cgm_capabilities — providers, metrics, privacy modes
-- cgm_connection_status — env, credentials, mode (live vs mock)
-- cgm_privacy_audit — what is stored locally vs sent to Dexcom
+- cgm_capabilities — providers (dexcom + libre), metrics, privacy modes
+- cgm_connection_status — active provider, credentials, mode (live vs mock)
+- cgm_privacy_audit — what is stored locally vs sent to the CGM provider
 - cgm_data_inventory — metric catalog, TIR ranges, GMI formula reference
-- cgm_glucose_now — most recent EGV + trend
-- cgm_glucose_window — all EGVs over last N hours (default 24)
+- cgm_glucose_now — most recent reading + trend (Dexcom or Libre)
+- cgm_glucose_window — all readings over last N hours (default 24)
 - cgm_daily_summary — mean/median/min/max/stdev + GMI + CV + 2 TIR profiles
 - cgm_meal_response — baseline → peak → return-to-baseline + band (excellent/good/moderate/poor)
+- cgm_hypo_events — hypoglycemia event detection (ADA Level 1 < 70, Level 2 < 54)
 - cgm_authorize_url — Dexcom OAuth authorize URL builder
+- cgm_libre_status — FreeStyle Libre (LibreLink Up) region + config + mock/live
+- cgm_libre_login — log in to LibreLink Up + list followed sensors (token never returned)
+(plus profile/onboarding/quickstart/demo helpers — see cgm_agent_manifest for the full list)
 
 Optional env vars:
+- CGM_PROVIDER — dexcom (default) or libre; auto-detects libre when only LIBRELINKUP_* creds are set
 - DEXCOM_ENV — sandbox (default) or production
 - DEXCOM_CLIENT_ID, DEXCOM_CLIENT_SECRET — from developer.dexcom.com
 - DEXCOM_REDIRECT_URI — must match exactly what you registered
 - DEXCOM_ACCESS_TOKEN — set after running `wellness-cgm exchange <auth_code>`; without it, mock mode is used
-- DEXCOM_REFRESH_TOKEN — used to refresh access tokens (refresh logic lands in v0.2)
+- DEXCOM_REFRESH_TOKEN — used to refresh access tokens (refresh logic lands later)
+- LIBRELINKUP_EMAIL, LIBRELINKUP_PASSWORD — FreeStyle Libre via LibreLink Up (same login as the LibreLinkUp app)
+- LIBRELINKUP_REGION — eu (default) | us | de | fr | au | jp ...; login also auto-follows a regional redirect
+- LIBRELINKUP_PATIENT_ID — pin a specific sensor if you follow more than one
 - WELLNESS_CGM_LOCAL_DIR — defaults to ~/.wellness-cgm
 - WELLNESS_CGM_QUIET=1 — suppress the stderr community CTA
 
 Workflow for agents:
-1. Call cgm_connection_status — check whether mode=live or mode=mock.
+1. Call cgm_connection_status — check the active provider (dexcom | libre) and whether mode=live or mode=mock. For Libre, run cgm_libre_login first to verify creds + discover the patientId.
 2. cgm_glucose_now for spot checks; cgm_daily_summary for trends.
 3. cgm_meal_response with the meal_time from wellness-nourish to compute spike + band.
 4. Surface BOTH TIR profiles (diabetic 70-180 ADA + metabolic-health 70-140 Levels-style).

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DexcomClient } from "../services/dexcom-client.js";
+import { LibreLinkUpClient } from "../services/librelink-client.js";
+import { CgmSource } from "../services/cgm-source.js";
 import {
   detectHypoEvents,
   mealResponse,
@@ -29,14 +31,8 @@ function jsonResponse(payload: unknown) {
   };
 }
 
-async function loadReadings(client: DexcomClient, hours: number): Promise<{ readings: GlucoseReading[]; mock: boolean }> {
-  if (!client.hasAuth()) {
-    return { readings: mockReadings(hours), mock: true };
-  }
-  const end = new Date();
-  const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
-  const readings = await client.getEgvs(start.toISOString(), end.toISOString());
-  return { readings, mock: false };
+async function loadReadings(source: CgmSource, hours: number): Promise<{ readings: GlucoseReading[]; mock: boolean }> {
+  return source.loadReadings(hours);
 }
 
 export function registerCgmTools(server: McpServer): void {
@@ -69,20 +65,20 @@ export function registerCgmTools(server: McpServer): void {
     "cgm_connection_status",
     {
       title: "CGM connection status",
-      description: "Reports Dexcom env (sandbox/production), whether credentials are present, and whether the connector will return mock vs live data.",
+      description:
+        "Reports the active CGM provider (dexcom | libre), why it was selected, whether credentials are present, and whether the connector will return mock vs live data. For Dexcom it includes the env (sandbox/production); for FreeStyle Libre it includes the LibreLink Up region.",
       inputSchema: {},
     },
     async () => {
-      const c = new DexcomClient();
+      const source = CgmSource.resolve();
+      const status = source.status();
+      // Backward-compatible Dexcom fields (kept for callers that read them directly).
+      const dexcom = new DexcomClient();
       return jsonResponse({
-        ok: true,
-        env: c.env,
-        client_id_configured: Boolean(c.clientId),
-        access_token_configured: c.hasAuth(),
-        mode: c.hasAuth() ? "live" : "mock",
-        notes: c.hasAuth()
-          ? ["Live mode — calls go to the Dexcom API."]
-          : ["Mock mode — set DEXCOM_ACCESS_TOKEN to enable live reads. Run 'wellness-cgm authorize' to start the OAuth flow."],
+        ...status,
+        env: dexcom.env,
+        client_id_configured: Boolean(dexcom.clientId),
+        access_token_configured: dexcom.hasAuth(),
       });
     },
   );
@@ -137,13 +133,13 @@ export function registerCgmTools(server: McpServer): void {
       inputSchema: {},
     },
     async () => {
-      const client = new DexcomClient();
-      const { readings, mock } = await loadReadings(client, 1);
+      const source = CgmSource.resolve();
+      const { readings, mock } = await loadReadings(source, 1);
       if (readings.length === 0) {
-        return jsonResponse({ ok: false, error: "no_readings", mock });
+        return jsonResponse({ ok: false, error: "no_readings", provider: source.provider, mock });
       }
       const latest = readings[readings.length - 1];
-      return jsonResponse({ ok: true, mock, latest });
+      return jsonResponse({ ok: true, provider: source.provider, mock, latest });
     },
   );
 
@@ -157,10 +153,10 @@ export function registerCgmTools(server: McpServer): void {
       },
     },
     async ({ hours }) => {
-      const client = new DexcomClient();
+      const source = CgmSource.resolve();
       const window = hours ?? 24;
-      const { readings, mock } = await loadReadings(client, window);
-      return jsonResponse({ ok: true, mock, hours: window, count: readings.length, readings });
+      const { readings, mock } = await loadReadings(source, window);
+      return jsonResponse({ ok: true, provider: source.provider, mock, hours: window, count: readings.length, readings });
     },
   );
 
@@ -199,7 +195,7 @@ export function registerCgmTools(server: McpServer): void {
       },
     },
     async ({ from, to, threshold_mg_dl, severe_threshold_mg_dl, min_duration_minutes, response_format }) => {
-      const client = new DexcomClient();
+      const source = CgmSource.resolve();
       const startMs = new Date(from).getTime();
       const endMs = new Date(to).getTime();
       if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
@@ -208,16 +204,7 @@ export function registerCgmTools(server: McpServer): void {
       if (endMs <= startMs) {
         return jsonResponse({ ok: false, error: "invalid_window", message: "to must be after from" });
       }
-      let readings: GlucoseReading[];
-      let mock: boolean;
-      if (!client.hasAuth()) {
-        const spanHours = Math.max(1, Math.ceil((endMs - startMs) / (60 * 60 * 1000)));
-        readings = mockReadings(Math.min(spanHours, 72));
-        mock = true;
-      } else {
-        readings = await client.getEgvs(new Date(startMs).toISOString(), new Date(endMs).toISOString());
-        mock = false;
-      }
+      const { readings, mock } = await source.loadReadingsWindow(startMs, endMs);
       try {
         const result = detectHypoEvents(readings, {
           threshold_mg_dl,
@@ -228,6 +215,7 @@ export function registerCgmTools(server: McpServer): void {
         });
         const payload: Record<string, unknown> = {
           ok: true,
+          provider: source.provider,
           mock,
           window: { from, to },
           medical_disclaimer:
@@ -255,11 +243,11 @@ export function registerCgmTools(server: McpServer): void {
       },
     },
     async ({ hours }) => {
-      const client = new DexcomClient();
+      const source = CgmSource.resolve();
       const window = hours ?? 24;
-      const { readings, mock } = await loadReadings(client, window);
+      const { readings, mock } = await loadReadings(source, window);
       const summary = summarize(readings);
-      return jsonResponse({ ok: true, mock, window_hours: window, summary });
+      return jsonResponse({ ok: true, provider: source.provider, mock, window_hours: window, summary });
     },
   );
 
@@ -318,9 +306,9 @@ export function registerCgmTools(server: McpServer): void {
       },
     },
     async ({ start_time, end_time, target_low, target_high, hours, time_window, start_hour, end_hour }) => {
-      const client = new DexcomClient();
+      const source = CgmSource.resolve();
       const loadHours = hours ?? 24;
-      const { readings, mock } = await loadReadings(client, loadHours);
+      const { readings, mock } = await loadReadings(source, loadHours);
       try {
         const tir = timeInRangeWindow(readings, {
           start_time,
@@ -343,6 +331,7 @@ export function registerCgmTools(server: McpServer): void {
         }
         return jsonResponse({
           ok: true,
+          provider: source.provider,
           mock,
           loaded_window_hours: loadHours,
           requested_window: { start_time, end_time },
@@ -369,14 +358,14 @@ export function registerCgmTools(server: McpServer): void {
       },
     },
     async ({ meal_time, window_hours }) => {
-      const client = new DexcomClient();
+      const source = CgmSource.resolve();
       const total = window_hours ?? 4;
-      const { readings, mock } = await loadReadings(client, total);
+      const { readings, mock } = await loadReadings(source, total);
       const response = mealResponse(readings, meal_time);
       if (!response) {
-        return jsonResponse({ ok: false, error: "insufficient_readings", mock, meal_time });
+        return jsonResponse({ ok: false, error: "insufficient_readings", provider: source.provider, mock, meal_time });
       }
-      return jsonResponse({ ok: true, mock, response });
+      return jsonResponse({ ok: true, provider: source.provider, mock, response });
     },
   );
 
@@ -579,10 +568,105 @@ export function registerCgmTools(server: McpServer): void {
         },
         notes: [
           "All sample data is synthetic (mock=true).",
-          `In live mode, set DEXCOM_ACCESS_TOKEN and the same tools return real Dexcom EGVs.`,
+          `In live mode, set DEXCOM_ACCESS_TOKEN (Dexcom) or LIBRELINKUP_EMAIL/PASSWORD (FreeStyle Libre) and the same tools return real EGVs.`,
           `Sample summary: mean=${summary.mean_mgdl} mg/dL, GMI=${summary.gmi_pct}% (estimated A1C), TIR(70-180)=${summary.diabetic_tir.in_range_pct}%.`,
         ],
       });
+    },
+  );
+
+  // --- FreeStyle Libre (via LibreLink Up) ---------------------------------
+
+  server.registerTool(
+    "cgm_libre_status",
+    {
+      title: "CGM Libre status",
+      description:
+        "Reports FreeStyle Libre (LibreLink Up) configuration: region, whether LIBRELINKUP_EMAIL/PASSWORD (or a token) are set, whether a patient id is pinned, and whether reads will be live or mock. Use this to confirm the Libre path is wired before calling glucose tools with CGM_PROVIDER=libre.",
+      inputSchema: {},
+    },
+    async () => {
+      const c = new LibreLinkUpClient();
+      const live = c.hasAuth();
+      return jsonResponse({
+        ok: true,
+        provider: "libre",
+        region: c.region,
+        credentials_configured: live,
+        patient_id_pinned: Boolean(c.fixedPatientId),
+        mode: live ? "live" : "mock",
+        env_vars: ["LIBRELINKUP_EMAIL", "LIBRELINKUP_PASSWORD", "LIBRELINKUP_REGION", "LIBRELINKUP_PATIENT_ID"],
+        notes: live
+          ? [
+              "Credentials present. Call cgm_libre_login to verify them and list your connected sensor, then set CGM_PROVIDER=libre (or unset DEXCOM_ACCESS_TOKEN) to route glucose tools through Libre.",
+            ]
+          : [
+              "Mock mode — set LIBRELINKUP_EMAIL and LIBRELINKUP_PASSWORD (the same login you use in the LibreLinkUp app) to enable live FreeStyle Libre reads.",
+              "Default region is 'eu' (api.libreview.io). Set LIBRELINKUP_REGION (e.g. 'us', 'de', 'fr', 'au', 'jp') if your account lives on another shard — login also auto-follows a regional redirect.",
+            ],
+      });
+    },
+  );
+
+  server.registerTool(
+    "cgm_libre_login",
+    {
+      title: "CGM Libre login",
+      description:
+        "Authenticate against LibreLink Up using LIBRELINKUP_EMAIL / LIBRELINKUP_PASSWORD and list the sensors (connections) this account follows. Confirms the FreeStyle Libre path works end-to-end before reading glucose. Never returns the auth token. When credentials are missing it returns mock=true with a synthetic connection so the surface can be demoed without an Abbott account.",
+      inputSchema: {},
+    },
+    async () => {
+      const c = new LibreLinkUpClient();
+      if (!c.hasAuth()) {
+        const sample = mockReadings(1);
+        return jsonResponse({
+          ok: true,
+          provider: "libre",
+          mock: true,
+          region: c.region,
+          connections: [
+            {
+              patientId: "mock-patient",
+              firstName: "Mock",
+              lastName: "Sensor",
+              latest: sample[sample.length - 1],
+            },
+          ],
+          notes: [
+            "Mock mode — set LIBRELINKUP_EMAIL and LIBRELINKUP_PASSWORD to log in for real.",
+            "In live mode this lists the patientId(s) you follow; pin one with LIBRELINKUP_PATIENT_ID if you follow more than one.",
+          ],
+        });
+      }
+      try {
+        const auth = await c.login();
+        const connections = await c.getConnections();
+        return jsonResponse({
+          ok: true,
+          provider: "libre",
+          mock: false,
+          region: c.region,
+          logged_in: true,
+          account_id_present: Boolean(auth.accountId),
+          connection_count: connections.length,
+          connections,
+          notes:
+            connections.length === 0
+              ? ["Logged in, but no connections found. In the LibreLinkUp app, accept the sharing invite from your LibreLink app."]
+              : [
+                  `Found ${connections.length} connection(s). Set CGM_PROVIDER=libre (or unset DEXCOM_ACCESS_TOKEN) so glucose tools read from Libre.`,
+                ],
+        });
+      } catch (err) {
+        return jsonResponse({
+          ok: false,
+          provider: "libre",
+          error: "libre_login_failed",
+          message: (err as Error).message,
+          hint: "Check LIBRELINKUP_EMAIL / LIBRELINKUP_PASSWORD and LIBRELINKUP_REGION. The credentials are the same as the LibreLinkUp (follower) app.",
+        });
+      }
     },
   );
 }

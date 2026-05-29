@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-29
+
+### Added
+
+- **FreeStyle Libre support via LibreLink Up — the OTC sensor.** wellness-cgm-mcp now reads from two real backends: Dexcom (Developer API) **and** FreeStyle Libre (Libre 2 / Libre 3) through Abbott's LibreLink Up companion API. Libre is the biggest lever for "real users with real data" because the consumer OTC sensor needs no developer-program signup — just the same email/password you use in the LibreLinkUp follower app.
+  - New `LibreLinkUpClient` (`services/librelink-client.ts`): `login()` → `getConnections()` → `getGraph()` / `getCurrent()`. Handles the 4.x `account-id` SHA-256 header, regional shards (`LIBRELINKUP_REGION`, default `eu`) with one auto-followed login redirect, US-locale timestamp parsing, and trend-arrow mapping. Returns the same `GlucoseReading` shape as Dexcom, so **the entire ADA TIR / GMI / hypo / meal-response engine is reused unchanged**.
+  - New provider-agnostic `CgmSource` (`services/cgm-source.ts`) backs every glucose tool. Provider is chosen by `CGM_PROVIDER` (`dexcom` | `libre`), else auto-detected (Libre when `LIBRELINKUP_*` creds are set and `DEXCOM_ACCESS_TOKEN` is not), else defaults to Dexcom — preserving pre-0.4 behaviour. Every glucose tool response now includes a `provider` field.
+  - New MCP tools: `cgm_libre_status` (region + config + mock/live) and `cgm_libre_login` (authenticate + list followed sensors, never returns the token; mock-mode demo without an Abbott account). Tool count: 17 → 19.
+  - New CLI command `wellness-cgm libre-login`. `doctor` now reports `cgm_provider` + `librelinkup_credentials`. `cgm_capabilities` lists `libre` as configured when its creds are present; `cgm_connection_status` reports the active provider and how it was selected.
+  - Env vars: `CGM_PROVIDER`, `LIBRELINKUP_EMAIL`, `LIBRELINKUP_PASSWORD`, `LIBRELINKUP_REGION`, `LIBRELINKUP_PATIENT_ID`, `LIBRELINKUP_TOKEN`, `LIBRELINKUP_ACCOUNT_ID`.
+  - Verified in mock mode (synthetic readings + the two new tools register and return data) and via a stubbed-fetch end-to-end test that parses a realistic LibreLink Up graph payload into `GlucoseReading[]` and runs it through the shared ADA TIR/GMI engine. **Validation against a real LibreLink Up account is still pending** before an npm release.
+
+### Changed
+
+- Backward compatible: existing Dexcom env vars, tools, and the mock fallback are unchanged. `cgm_connection_status` keeps its legacy `env` / `client_id_configured` / `access_token_configured` fields and adds provider-aware fields on top.
+
 ## [0.3.3] - 2026-05-20
 
 ### Added

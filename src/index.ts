@@ -76,6 +76,7 @@ if (args.includes("--http")) {
       "  wellness-cgm setup [client] Print MCP client config snippet.",
       "  wellness-cgm authorize      Print Dexcom OAuth authorize URL.",
       "  wellness-cgm exchange <code> Swap an auth code for an access_token.",
+      "  wellness-cgm libre-login    Log in to FreeStyle Libre (LibreLink Up) + list sensors.",
     ].join("\n"),
   );
   process.exit(1);

@@ -1,5 +1,6 @@
 import { NPM_PACKAGE_NAME, SERVER_VERSION } from "../constants.js";
 import { DexcomClient } from "../services/dexcom-client.js";
+import { LibreLinkUpClient } from "../services/librelink-client.js";
 import { buildCapabilities } from "../services/capabilities.js";
 import { buildPrivacyAudit } from "../services/privacy-audit.js";
 import {
@@ -9,7 +10,15 @@ import {
   missingCriticalFields,
 } from "../services/profile-store.js";
 
-const COMMANDS = new Set(["status", "doctor", "setup", "authorize", "exchange", "onboarding"]);
+const COMMANDS = new Set([
+  "status",
+  "doctor",
+  "setup",
+  "authorize",
+  "exchange",
+  "onboarding",
+  "libre-login",
+]);
 
 function printCommunityCTA(): void {
   if (process.env.WELLNESS_CGM_QUIET === "1") return;
@@ -44,6 +53,8 @@ export async function runCliCommand(args: string[]): Promise<number> {
         return await exchange(rest);
       case "onboarding":
         return await onboarding(rest);
+      case "libre-login":
+        return await libreLogin();
       default:
         return -1;
     }
@@ -75,8 +86,11 @@ function printStatus(): number {
 
 function doctor(): number {
   const c = new DexcomClient();
+  const libre = new LibreLinkUpClient();
+  const provider = (process.env.CGM_PROVIDER ?? "").trim().toLowerCase() || (libre.hasAuth() && !c.hasAuth() ? "libre (auto)" : "dexcom (default)");
   const checks = [
     { name: "node", ok: true, detail: process.version },
+    { name: "cgm_provider", ok: true, detail: provider },
     { name: "dexcom_env", ok: true, detail: c.env },
     { name: "client_id", ok: Boolean(c.clientId), detail: c.clientId ? "set" : "missing" },
     { name: "redirect_uri", ok: Boolean(c.redirectUri), detail: c.redirectUri ?? "missing" },
@@ -84,6 +98,11 @@ function doctor(): number {
       name: "access_token",
       ok: c.hasAuth(),
       detail: c.hasAuth() ? "present" : "missing — running in mock mode",
+    },
+    {
+      name: "librelinkup_credentials",
+      ok: libre.hasAuth(),
+      detail: libre.hasAuth() ? `present (region ${libre.region})` : "missing — FreeStyle Libre disabled",
     },
   ];
   const recommendations: string[] = [];
@@ -103,6 +122,15 @@ function doctor(): number {
   } else {
     recommendations.push(
       "Live mode active. Try `wellness-cgm-mcp` over MCP and call cgm_glucose_now or cgm_daily_summary.",
+    );
+  }
+  if (!libre.hasAuth()) {
+    recommendations.push(
+      "Using a FreeStyle Libre (the OTC sensor)? Set LIBRELINKUP_EMAIL / LIBRELINKUP_PASSWORD, then run `wellness-cgm libre-login` and set CGM_PROVIDER=libre.",
+    );
+  } else {
+    recommendations.push(
+      "FreeStyle Libre configured. Run `wellness-cgm libre-login` to verify and list your sensor, then set CGM_PROVIDER=libre.",
     );
   }
   console.log(
@@ -137,21 +165,24 @@ function setup(args: string[]): number {
               command: "npx",
               args: ["-y", NPM_PACKAGE_NAME],
               env: {
+                CGM_PROVIDER: "${CGM_PROVIDER:-dexcom}",
                 DEXCOM_ENV: "sandbox",
                 DEXCOM_CLIENT_ID: "${DEXCOM_CLIENT_ID}",
                 DEXCOM_CLIENT_SECRET: "${DEXCOM_CLIENT_SECRET}",
                 DEXCOM_REDIRECT_URI: "${DEXCOM_REDIRECT_URI}",
                 DEXCOM_ACCESS_TOKEN: "${DEXCOM_ACCESS_TOKEN:-}",
+                LIBRELINKUP_EMAIL: "${LIBRELINKUP_EMAIL:-}",
+                LIBRELINKUP_PASSWORD: "${LIBRELINKUP_PASSWORD:-}",
+                LIBRELINKUP_REGION: "${LIBRELINKUP_REGION:-eu}",
               },
             },
           },
         },
         next_steps: [
-          "Sign up at https://developer.dexcom.com and create a project (sandbox is free).",
-          "Set DEXCOM_CLIENT_ID, DEXCOM_CLIENT_SECRET, DEXCOM_REDIRECT_URI in your env or MCP config.",
-          "Run `wellness-cgm authorize` to print the OAuth URL — open it, grant access, copy the auth code from the redirect.",
-          "Run `wellness-cgm exchange <auth_code>` to swap the code for an access_token.",
-          "Set DEXCOM_ACCESS_TOKEN and restart the MCP. Until then, all tools return mock data.",
+          "Pick a provider with CGM_PROVIDER (dexcom | libre). It auto-detects libre when only LIBRELINKUP_* creds are set.",
+          "Dexcom: sign up at https://developer.dexcom.com, set DEXCOM_CLIENT_ID/SECRET/REDIRECT_URI, run `wellness-cgm authorize` then `wellness-cgm exchange <code>`, and set DEXCOM_ACCESS_TOKEN.",
+          "FreeStyle Libre (OTC sensor): set LIBRELINKUP_EMAIL/PASSWORD (same as the LibreLinkUp app), optionally LIBRELINKUP_REGION, then run `wellness-cgm libre-login` to verify and list your sensor.",
+          "Until a provider is configured, all tools return mock data tagged mock: true.",
         ],
       },
       null,
@@ -203,6 +234,54 @@ async function onboarding(args: string[]): Promise<number> {
     );
   }
   return 0;
+}
+
+async function libreLogin(): Promise<number> {
+  const c = new LibreLinkUpClient();
+  if (!c.hasAuth()) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: false,
+          provider: "libre",
+          mode: "mock",
+          region: c.region,
+          message:
+            "Set LIBRELINKUP_EMAIL and LIBRELINKUP_PASSWORD (the same login you use in the LibreLinkUp app), then re-run `wellness-cgm libre-login`.",
+          hint: "Optional: LIBRELINKUP_REGION (eu|us|de|fr|au|jp), LIBRELINKUP_PATIENT_ID (pin a sensor if you follow more than one).",
+        },
+        null,
+        2,
+      ),
+    );
+    return 1;
+  }
+  try {
+    const auth = await c.login();
+    const connections = await c.getConnections();
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          provider: "libre",
+          mode: "live",
+          region: c.region,
+          logged_in: true,
+          account_id_present: Boolean(auth.accountId),
+          connection_count: connections.length,
+          connections,
+          next: "Set CGM_PROVIDER=libre (or leave DEXCOM_ACCESS_TOKEN unset) so the glucose tools read from FreeStyle Libre.",
+        },
+        null,
+        2,
+      ),
+    );
+    printCommunityCTA();
+    return 0;
+  } catch (err) {
+    console.error((err as Error).message);
+    return 1;
+  }
 }
 
 async function exchange(args: string[]): Promise<number> {

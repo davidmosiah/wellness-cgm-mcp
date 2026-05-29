@@ -33,7 +33,7 @@
 
 ## Overview
 
-Local MCP server that exposes Dexcom CGM data (and synthetic mock data when no token is set) to any MCP-aware agent. v0.1 ships full Dexcom Developer API support — sandbox + production. FreeStyle Libre via LibreLink Up is roadmapped for v0.2.
+Local MCP server that exposes CGM data (and synthetic mock data when nothing is configured) to any MCP-aware agent. Two real backends are supported: **Dexcom** (Developer API, sandbox + production) and **FreeStyle Libre** (the OTC sensor — Libre 2 / Libre 3) via **LibreLink Up**. Pick the backend with `CGM_PROVIDER`; it auto-detects Libre when only Libre credentials are set. Both feed the same ADA time-in-range / GMI / hypo / meal-response engine.
 
 ## Try It In 60 Seconds (mock mode, zero setup)
 
@@ -73,7 +73,25 @@ npx -y wellness-cgm-mcp exchange <auth_code_from_redirect>
 # 5. Set DEXCOM_ACCESS_TOKEN to the access_token, restart the MCP — flips from mock to live.
 ```
 
-## Tools (10)
+## Live setup (FreeStyle Libre — the OTC sensor)
+
+No developer program, no app to build — just the **same email/password you use in the LibreLinkUp follower app** (the OTC Libre 2 / Libre 3 sensor works). In the LibreLink app, share your readings; in the LibreLinkUp app, accept the invite. Then:
+
+```bash
+export CGM_PROVIDER=libre               # or just set the creds below and let it auto-detect
+export LIBRELINKUP_EMAIL=you@example.com
+export LIBRELINKUP_PASSWORD=...
+# Optional: region shard if you're not on EU/global, and a pinned sensor:
+export LIBRELINKUP_REGION=us            # eu (default) | us | de | fr | au | jp ...
+# export LIBRELINKUP_PATIENT_ID=<id>    # only if you follow more than one sensor
+
+# Verify credentials + list the sensor(s) you follow (never prints the token):
+npx -y wellness-cgm-mcp libre-login
+```
+
+Once logged in, every glucose tool (`cgm_glucose_now`, `cgm_daily_summary`, `cgm_time_in_range`, `cgm_meal_response`, `cgm_hypo_events`, …) reads from Libre and returns the same ADA TIR / GMI / hypo / meal-response metrics — each response carries a `provider` field so you always know the source. Without any credentials, everything returns synthetic `mock: true` data.
+
+## Tools (19)
 
 | Tool | Purpose |
 |---|---|
@@ -88,6 +106,10 @@ npx -y wellness-cgm-mcp exchange <auth_code_from_redirect>
 | **`cgm_meal_response`** | **Baseline → peak → return + band** |
 | `cgm_authorize_url` | Dexcom OAuth URL builder |
 | **`cgm_hypo_events`** | **Hypo event detection (ADA Level 1 < 70, Level 2 < 54) — v0.3.3** |
+| **`cgm_libre_status`** | **FreeStyle Libre (LibreLink Up) config + region + mode — v0.4** |
+| **`cgm_libre_login`** | **Log in to LibreLink Up + list followed sensors — v0.4** |
+
+> The table omits the shared profile/onboarding/quickstart/demo helpers (`cgm_profile_get`, `cgm_profile_update`, `cgm_onboarding`, `cgm_quickstart`, `cgm_demo`) for brevity — call `cgm_agent_manifest` for the full, always-current list.
 
 ## Two Time-In-Range profiles in every summary
 
@@ -127,17 +149,16 @@ Levels charges $199/mo for this. Here it is, free, local-first, MCP.
 
 ## Privacy
 
-- ✅ **Tokens local only** — DEXCOM_ACCESS_TOKEN stays in env vars.
-- ✅ **Mock mode by default** — every tool returns synthetic data with `mock: true` until a token is configured.
-- ✅ **No third-party telemetry** — only outbound calls go to Dexcom.
+- ✅ **Credentials local only** — `DEXCOM_ACCESS_TOKEN` / `LIBRELINKUP_*` stay in env vars; the LibreLink Up auth token is never returned in tool output.
+- ✅ **Mock mode by default** — every tool returns synthetic data with `mock: true` until a provider is configured.
+- ✅ **No third-party telemetry** — outbound calls go only to your CGM provider (Dexcom or, for Libre, Abbott's LibreLink Up API).
 
 Run `wellness-cgm-mcp doctor` to inspect.
 
 ## Roadmap
 
-- **v0.2** — FreeStyle Libre via LibreLink Up community proxy. Refresh-token rotation. Cross-meal automation with wellness-nourish.
-- **v0.3** — Per-meal historical browser (which foods spike YOU?).
-- **v0.4** — Threshold alerts (agent notified when glucose holds > X mg/dL for Y minutes).
+- ✅ **v0.4** — FreeStyle Libre via LibreLink Up (the OTC sensor). _Shipped._
+- **next** — Refresh-token rotation. Per-meal historical browser (which foods spike YOU?). Threshold alerts (agent notified when glucose holds > X mg/dL for Y minutes). Cross-meal automation with wellness-nourish.
 
 ## What this is NOT
 
