@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1] - 2026-07-16
+
+### Fixed
+
+- Added executable provider-boundary contracts for Dexcom v3 and LibreLink Up, including endpoints, auth headers, identifier encoding, and canonical glucose mapping.
+- Dexcom EGV windows now require valid ISO 8601 date-times, normalize offsets to UTC, reject reversed ranges, and enforce the official 30-day maximum before network I/O.
+- Updated the transitive Hono security override to 4.12.30.
+
 ## [Unreleased]
 
 ## [0.4.0] - 2026-05-29

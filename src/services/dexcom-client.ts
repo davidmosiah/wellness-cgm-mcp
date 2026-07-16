@@ -103,7 +103,8 @@ export class DexcomClient {
 
   async getEgvs(startDate: string, endDate: string): Promise<GlucoseReading[]> {
     if (!this.accessToken) throw new Error("DEXCOM_ACCESS_TOKEN required");
-    const url = `${this.baseUrl}/v3/users/self/egvs?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+    const range = normalizeDexcomUtcRange(startDate, endDate);
+    const url = `${this.baseUrl}/v3/users/self/egvs?startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}`;
     const res = await this.fetchImpl(url, {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
@@ -122,4 +123,26 @@ export class DexcomClient {
       }))
       .filter((r) => r.timestamp && Number.isFinite(r.mgdl) && r.mgdl > 0);
   }
+}
+
+function normalizeDexcomUtcRange(startDate: string, endDate: string): { startDate: string; endDate: string } {
+  const parse = (value: string, field: string): Date => {
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      throw new Error(`${field} must be a valid ISO 8601 date-time`);
+    }
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) {
+      throw new Error(`${field} must be a valid ISO 8601 date-time`);
+    }
+    return date;
+  };
+  const start = parse(startDate, "startDate");
+  const end = parse(endDate, "endDate");
+  if (start.getTime() >= end.getTime()) {
+    throw new Error("startDate must be before endDate");
+  }
+  if (end.getTime() - start.getTime() > 30 * 24 * 60 * 60 * 1000) {
+    throw new Error("Dexcom query windows must be 30 days or less");
+  }
+  return { startDate: start.toISOString(), endDate: end.toISOString() };
 }
