@@ -292,16 +292,45 @@ async function exchange(args: string[]): Promise<number> {
   }
   const c = new DexcomClient();
   const tokens = await c.exchangeAuthCode(code);
+  // Never print access/refresh tokens to stdout (shell history, agent logs, demos).
+  // Persist to a local 0o600 token file and instruct env export without echoing secrets.
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const tokenDir = join(homedir(), ".wellness-cgm-mcp");
+  const tokenPath = join(tokenDir, "tokens.json");
+  mkdirSync(tokenDir, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    tokenPath,
+    JSON.stringify(
+      {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: tokens.expires_at,
+        scope: tokens.scope,
+        updated_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
   console.log(
     JSON.stringify(
       {
         ok: true,
         env: c.env,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
+        token_path: tokenPath,
+        access_token_saved: true,
+        refresh_token_saved: Boolean(tokens.refresh_token),
         expires_at: tokens.expires_at,
         scope: tokens.scope,
-        next: "Set DEXCOM_ACCESS_TOKEN to the access_token above (and DEXCOM_REFRESH_TOKEN to the refresh_token).",
+        next: [
+          `Tokens written to ${tokenPath} (mode 0600). Do not commit this file.`,
+          "Export for the MCP process without pasting into chat:",
+          `  export DEXCOM_ACCESS_TOKEN="$(node -pe \\"require('${tokenPath}').access_token\\")"`,
+          `  export DEXCOM_REFRESH_TOKEN="$(node -pe \\"require('${tokenPath}').refresh_token\\")"`,
+        ],
       },
       null,
       2,

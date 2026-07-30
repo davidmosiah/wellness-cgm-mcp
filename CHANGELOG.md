@@ -1,5 +1,12 @@
 # Changelog
 
+
+## 0.4.2 - 2026-07-30
+
+### Security
+
+- Security: exchange CLI writes tokens to ~/.wellness-cgm-mcp/tokens.json (0600) and never prints access/refresh tokens.
+
 ## [0.4.1] - 2026-07-16
 
 ### Fixed
