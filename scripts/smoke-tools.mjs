@@ -42,7 +42,30 @@ console.log(`✓ all ${EXPECTED_TOOLS.size} tools registered`);
 
 const manifest = JSON.parse((await client.callTool({ name: "cgm_agent_manifest", arguments: {} })).content[0].text);
 assert.equal(manifest.name, "wellness-cgm-mcp");
-console.log("✓ cgm_agent_manifest valid");
+assert.ok(Array.isArray(manifest.standard_tools) && manifest.standard_tools.length > 0);
+console.log("✓ cgm_agent_manifest valid (incl. standard_tools)");
+
+const privacyModeTool = tools.find((t) => t.name === "cgm_glucose_now");
+assert.ok(privacyModeTool, "cgm_glucose_now must exist");
+assert.ok(
+  privacyModeTool.inputSchema?.properties?.privacy_mode || privacyModeTool.inputSchema?.properties?.privacyMode,
+  "cgm_glucose_now must expose privacy_mode in inputSchema",
+);
+assert.equal(privacyModeTool.annotations?.readOnlyHint, true, "cgm_glucose_now must be annotated readOnlyHint");
+console.log("✓ privacy_mode + readOnlyHint present on cgm_glucose_now");
+
+const authTool = tools.find((t) => t.name === "cgm_authorize_url");
+assert.ok(authTool, "cgm_authorize_url must exist");
+assert.match(
+  authTool.description ?? "",
+  /Gated by|explicit user|Read-only OAuth/i,
+  "cgm_authorize_url must document gate / non-mutation wording",
+);
+console.log("✓ cgm_authorize_url description documents explicit user-action gate");
+
+const { resources } = await client.listResources();
+assert.ok(resources.length >= 3, `expected ≥3 MCP resources, got ${resources.length}`);
+console.log(`✓ listResources returns ${resources.length} resources`);
 
 const status = JSON.parse((await client.callTool({ name: "cgm_connection_status", arguments: {} })).content[0].text);
 assert.equal(status.ok, true);

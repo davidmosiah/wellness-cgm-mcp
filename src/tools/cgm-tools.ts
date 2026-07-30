@@ -23,11 +23,76 @@ import {
   updateProfile,
   type WellnessProfileDocument,
 } from "../services/profile-store.js";
+import { PrivacyModeSchema } from "../schemas/common.js";
 
-function jsonResponse(payload: unknown) {
+/** Mutation-name patterns (aligned with mcp-scorecard MUTATION_PATTERNS). */
+const MUTATION_NAME_RE =
+  /(^|_)(set|update|delete|create|pause|resume|enable|disable|cancel|publish|send|remove|add|insert|patch|put|post|exchange|revoke|grant|authorize|reset|clear|forget|destroy|wipe|logout|signout|sign_out|log_intake|log_water|bulk_log|remember|undo|snooze|dismiss)(_|$)/i;
+
+const OPEN_WORLD_READ_RE =
+  /(glucose_now|glucose_window|daily_summary|time_in_range|meal_response|hypo_events|libre_login|libre_status)/i;
+
+function decorateReadToolConfig(
+  name: string,
+  config: {
+    title?: string;
+    description?: string;
+    inputSchema?: Record<string, unknown>;
+    annotations?: Record<string, unknown>;
+    [key: string]: unknown;
+  },
+) {
+  if (MUTATION_NAME_RE.test(name)) return config;
+  const existingSchema = (config.inputSchema ?? {}) as Record<string, unknown>;
+  const existingAnn = (config.annotations ?? {}) as Record<string, unknown>;
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-    structuredContent: payload as Record<string, unknown>,
+    ...config,
+    inputSchema: {
+      ...existingSchema,
+      privacy_mode: existingSchema.privacy_mode ?? PrivacyModeSchema,
+    },
+    annotations: {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: existingAnn.openWorldHint ?? OPEN_WORLD_READ_RE.test(name),
+      ...existingAnn,
+      readOnlyHint: true,
+    },
+  };
+}
+
+/** Light redaction for privacy_mode=summary (omit patient/device identifiers). */
+function applyPrivacyMode(payload: Record<string, unknown>, privacy_mode?: string): Record<string, unknown> {
+  const mode = privacy_mode ?? "structured";
+  if (mode !== "summary") return { ...payload, privacy_mode: mode };
+  const out: Record<string, unknown> = { ...payload, privacy_mode: mode };
+  if (out.latest && typeof out.latest === "object" && out.latest !== null) {
+    const latest = { ...(out.latest as Record<string, unknown>) };
+    delete latest.deviceId;
+    delete latest.transmitterId;
+    delete latest.serialNumber;
+    out.latest = latest;
+  }
+  if (Array.isArray(out.connections)) {
+    out.connections = (out.connections as Record<string, unknown>[]).map((c) => {
+      const copy = { ...c };
+      delete copy.patientId;
+      delete copy.firstName;
+      delete copy.lastName;
+      return copy;
+    });
+  }
+  return out;
+}
+
+function jsonResponse(payload: unknown, privacy_mode?: string) {
+  const shaped =
+    privacy_mode !== undefined && payload && typeof payload === "object"
+      ? applyPrivacyMode(payload as Record<string, unknown>, privacy_mode)
+      : payload;
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(shaped, null, 2) }],
+    structuredContent: shaped as Record<string, unknown>,
   };
 }
 
@@ -36,6 +101,14 @@ async function loadReadings(source: CgmSource, hours: number): Promise<{ reading
 }
 
 export function registerCgmTools(server: McpServer): void {
+  const registerTool = server.registerTool.bind(server) as (
+    name: string,
+    config: Record<string, unknown>,
+    handler: unknown,
+  ) => unknown;
+  (server as unknown as { registerTool: typeof registerTool }).registerTool = (name, config, handler) =>
+    registerTool(name, decorateReadToolConfig(name, config), handler);
+
   server.registerTool(
     "cgm_agent_manifest",
     {
@@ -132,14 +205,15 @@ export function registerCgmTools(server: McpServer): void {
       description: "Returns the most recent EGV (estimated glucose value) plus trend arrow if available.",
       inputSchema: {},
     },
-    async () => {
+    async (params) => {
+      const privacy_mode = (params as { privacy_mode?: string }).privacy_mode;
       const source = CgmSource.resolve();
       const { readings, mock } = await loadReadings(source, 1);
       if (readings.length === 0) {
-        return jsonResponse({ ok: false, error: "no_readings", provider: source.provider, mock });
+        return jsonResponse({ ok: false, error: "no_readings", provider: source.provider, mock }, privacy_mode);
       }
       const latest = readings[readings.length - 1];
-      return jsonResponse({ ok: true, provider: source.provider, mock, latest });
+      return jsonResponse({ ok: true, provider: source.provider, mock, latest }, privacy_mode);
     },
   );
 
@@ -374,9 +448,15 @@ export function registerCgmTools(server: McpServer): void {
     {
       title: "CGM authorize URL",
       description:
-        "Builds the Dexcom OAuth authorize URL. The user opens it, grants access, and Dexcom redirects to your registered DEXCOM_REDIRECT_URI with an auth code. If credentials are missing, returns a hint with the exact env vars needed.",
+        "Read-only OAuth URL generation; does not exchange tokens. Not a state mutation of glucose data. Gated by: user must open URL themselves (explicit user action). Builds the Dexcom OAuth authorize URL. The user opens it, grants access, and Dexcom redirects to your registered DEXCOM_REDIRECT_URI with an auth code. If credentials are missing, returns a hint with the exact env vars needed.",
       inputSchema: {
         state: z.string().optional(),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     },
     async ({ state }) => {

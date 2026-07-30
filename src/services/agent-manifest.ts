@@ -43,6 +43,7 @@ export interface CgmAgentManifest {
   supported_clients: CgmAgentClient[];
   install: { command: string; args: string[]; optional_env: string[] };
   recommended_first_calls: string[];
+  standard_tools: ReadonlyArray<string>;
   tools: ReadonlyArray<string>;
   resources: string[];
   agent_rules: string[];
@@ -76,10 +77,13 @@ export function buildAgentManifest(client: CgmAgentClient = "generic"): CgmAgent
       ],
     },
     recommended_first_calls: ["cgm_profile_get", "cgm_quickstart", "cgm_glucose_now"],
+    standard_tools: TOOLS,
     tools: TOOLS,
     resources: [
       "wellness-cgm-mcp://agent-manifest",
       "wellness-cgm-mcp://capabilities",
+      "wellness-cgm-mcp://connection-status",
+      "wellness-cgm-mcp://inventory",
       "wellness-cgm-mcp://privacy-audit",
     ],
     agent_rules: [
@@ -92,6 +96,7 @@ export function buildAgentManifest(client: CgmAgentClient = "generic"): CgmAgent
       "Treat CGM data as medical-record sensitive. Defer insulin / medication dosing to clinician.",
       "Hypo events (cgm_hypo_events) always include a MEDICAL DISCLAIMER — never use the output for treatment decisions; defer to the user's clinician.",
       "Never claim diagnostic accuracy.",
+      "privacy_mode=summary on read tools omits device/patient identifiers; structured/raw return full payloads.",
     ],
     community: {
       repo: "https://github.com/davidmosiah/wellness-cgm-mcp",

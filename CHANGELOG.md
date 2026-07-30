@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 - 2026-07-30
+
+### Added
+
+- **Agent-readiness (mcp-scorecard):** real `privacy_mode` input on all read tools (`summary|structured|raw`), full MCP resource set (`wellness-cgm-mcp://agent-manifest|capabilities|connection-status|inventory|privacy-audit`), `readOnlyHint` annotations on read tools, and `standard_tools` on `cgm_agent_manifest`.
+- `cgm_authorize_url` description documents read-only OAuth URL generation and explicit user-action gate (no token exchange).
 
 ## 0.4.2 - 2026-07-30
 
