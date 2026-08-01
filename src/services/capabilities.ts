@@ -1,4 +1,4 @@
-import { SUPPORTED_PROVIDERS, type CgmProvider } from "../constants.js";
+import { LIBRELINKUP_MAX_WINDOW_HOURS, SUPPORTED_PROVIDERS, type CgmProvider } from "../constants.js";
 
 export interface CgmCapabilities {
   providers: ReadonlyArray<CgmProvider>;
@@ -39,6 +39,7 @@ export function buildCapabilities(): CgmCapabilities {
       "Dexcom ships against the official Developer API (sandbox + production).",
       "FreeStyle Libre (the OTC sensor) ships via LibreLink Up: set LIBRELINKUP_EMAIL / LIBRELINKUP_PASSWORD (and optionally LIBRELINKUP_REGION). Pick the backend with CGM_PROVIDER (dexcom | libre); it auto-detects Libre when only Libre creds are set.",
       "Both providers feed the same ADA TIR / GMI / hypo / meal-response engine — metrics are identical regardless of sensor.",
+      `Window depth differs by provider: Dexcom v3 honours an explicit start/end, while LibreLink Up caps a live read at ~${LIBRELINKUP_MAX_WINDOW_HOURS}h and ignores wider spans. Windowed payloads always carry hours_covered / observed_window — trust those over the requested window.`,
       "Without any provider credentials, all glucose tools return mock readings so agents can demo the surface.",
       "Time-in-range uses two profiles: ADA diabetic (70-180 mg/dL) AND Levels-style metabolic-health (70-140 mg/dL).",
       "GMI (estimated A1C) is computed via Bergenstal 2018 formula: 3.31 + 0.02392 × mean(mg/dL).",

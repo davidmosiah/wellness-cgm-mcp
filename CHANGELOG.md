@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 - 2026-08-01
+
+### Fixed
+
+- **FreeStyle Libre live reads silently reported a window they never covered — a wrong health number, not a cosmetic one.** LibreLink Up's `/graph` endpoint takes no start/end parameter: it always answers with its own fixed trailing ~12h. The connector still echoed the span the caller *asked for*, so `cgm_daily_summary(hours: 72)` on a live Libre sensor returned `window_hours: 72` next to **GMI (estimated A1C), CV and both time-in-range profiles computed over ~12h of data** — and that payload carries no timestamps at all, so the agent was *structurally incapable* of noticing. Any agent following the contract would tell the user "your 3-day glucose control is X" while looking at half a day. `cgm_glucose_window` had the same false `hours`, and `cgm_time_in_range` the same false `loaded_window_hours`.
+  - Root cause: a comment in `services/cgm-source.ts` asserted that trimming the graph to the requested window meant "callers get the hours they asked for". Trimming can only *narrow* the ~12h Abbott returns; it can never widen it. The comment was wrong and the payloads believed it.
+  - `CgmSource.loadReadings` / `loadReadingsWindow` now return real coverage on every load: `requested_hours`, `covered_hours` (derived from the oldest/newest reading actually returned), `provider_max_hours`, `truncated` and `observed_window` — the same `observed_window` idiom `cgm_hypo_events` already used.
+  - `cgm_glucose_window`, `cgm_daily_summary` and `cgm_time_in_range` now publish `hours_covered`, `observed_window`, `window_truncated_by_provider` and, when the provider ceiling bit, an explicit `notes` entry: *"LibreLink Up returns ~12h of graph data per read and ignores wider spans; requested 72h, covered 12h. Every metric here describes the covered window only…"*.
+  - **Agents: read `hours_covered`, not the requested window.** For multi-day GMI/TIR use Dexcom, whose v3 API honours an explicit start/end.
+- Scope is exactly the broken path — Libre **and** live **and** a window wider than ~12h. Dexcom (explicit start/end) and mock mode (synthesises the full requested span) were already honest and are untouched; requests of ≤12h on Libre emit no note.
+
+### Added
+
+- `LIBRELINKUP_MAX_WINDOW_HOURS` (12) in `constants.ts`, documenting the ceiling in one place.
+- The ~12h Libre ceiling is now documented where agents and humans actually look: tool descriptions, `cgm_capabilities` notes, `cgm_agent_manifest` agent rules, `cgm_connection_status` (live Libre `detail.max_window_hours` + note), README and `llms.txt`. None of them mentioned it before.
+- **Regression gate** `scripts/libre-window-test.mjs` (wired into `npm test`): boots the real MCP server over stdio with a preloaded synthetic LibreLink Up network stub (`scripts/fixtures/librelink-graph-stub.mjs`), so the **live** Libre path runs without an Abbott account. Asserts (1) 72h request → both blind handlers declare ~12h covered + emit the note, (2) 6h request → no note, (3) mock mode → still genuinely ~72h, no note. Verified to fail on 0.4.3 and pass on 0.5.0. All fixture data is synthetic.
+
+### Changed
+
+- Minor bump, not patch: the tool output contract gained fields. Existing fields (`hours`, `window_hours`, `loaded_window_hours`, `count`, `summary`, `readings`) are unchanged, so current callers keep working — they were just believing the wrong one.
+
 ## 0.4.3 - 2026-07-30
 
 ### Added

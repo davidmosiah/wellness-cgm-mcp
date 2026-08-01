@@ -1,5 +1,5 @@
 export const SERVER_NAME = "wellness-cgm-mcp";
-export const SERVER_VERSION = "0.4.3";
+export const SERVER_VERSION = "0.5.0";
 export const NPM_PACKAGE_NAME = "wellness-cgm-mcp";
 export const PINNED_NPM_PACKAGE = `${NPM_PACKAGE_NAME}@${SERVER_VERSION}`;
 export const USER_AGENT = `${NPM_PACKAGE_NAME}/${SERVER_VERSION} (https://wellness.delx.ai/connectors/cgm; contact: david@delx.ai)`;
@@ -27,6 +27,17 @@ export const DEXCOM_OAUTH_TOKEN = "/v2/oauth2/token";
 export const LIBRELINKUP_DEFAULT_REGION = "eu";
 export const LIBRELINKUP_PRODUCT = "llu.android";
 export const LIBRELINKUP_VERSION = "4.12.0";
+/**
+ * Hard ceiling on how much history one LibreLink Up read can return.
+ *
+ * `/llu/connections/{id}/graph` takes NO start/end parameter: it always answers
+ * with its own fixed trailing window (~12h of 5-minute points plus the current
+ * measurement). Asking for 24h or 72h does not widen it — the extra hours simply
+ * do not exist in the response. Every payload built from a Libre live read must
+ * therefore report the window it actually COVERED, not the one that was asked
+ * for (see `LoadedReadings.covered_hours`).
+ */
+export const LIBRELINKUP_MAX_WINDOW_HOURS = 12;
 /** Build the regional LibreLink Up API base for a given region code. */
 export function libreLinkUpBase(region: string = LIBRELINKUP_DEFAULT_REGION): string {
   const r = region.trim().toLowerCase();

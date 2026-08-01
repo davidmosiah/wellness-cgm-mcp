@@ -91,6 +91,25 @@ npx -y wellness-cgm-mcp libre-login
 
 Once logged in, every glucose tool (`cgm_glucose_now`, `cgm_daily_summary`, `cgm_time_in_range`, `cgm_meal_response`, `cgm_hypo_events`, …) reads from Libre and returns the same ADA TIR / GMI / hypo / meal-response metrics — each response carries a `provider` field so you always know the source. Without any credentials, everything returns synthetic `mock: true` data.
 
+### Libre history limit: ~12h per read
+
+LibreLink Up's graph endpoint takes **no start/end parameter** — it always answers with its own fixed trailing window of roughly **12 hours**. Asking for 24h or 72h does not widen it, so on Libre those extra hours simply do not exist.
+
+Every windowed payload therefore reports what it actually covered:
+
+```jsonc
+// cgm_daily_summary({ hours: 72 }) on live Libre
+{
+  "window_hours": 72,          // what you asked for
+  "hours_covered": 12,         // what the numbers below are ACTUALLY computed over
+  "observed_window": { "start": "…", "end": "…", "hours": 12 },
+  "window_truncated_by_provider": true,
+  "notes": ["LibreLink Up returns ~12h of graph data per read and ignores wider spans; requested 72h, covered 12h. …"]
+}
+```
+
+Read `hours_covered`, never the requested `hours` / `window_hours`. A GMI (estimated A1C), CV or time-in-range built on 12h is not a 3-day result. **For multi-day metrics use Dexcom**, whose v3 API takes an explicit start/end and honours the request. Mock mode synthesises the full requested span, so it is never truncated.
+
 ## Tools (19)
 
 | Tool | Purpose |
@@ -101,8 +120,8 @@ Once logged in, every glucose tool (`cgm_glucose_now`, `cgm_daily_summary`, `cgm
 | `cgm_privacy_audit` | Local storage + outbound destinations |
 | `cgm_data_inventory` | Metric catalog + TIR ranges + GMI formula |
 | **`cgm_glucose_now`** | **Most recent EGV + trend** |
-| `cgm_glucose_window` | All EGVs over last N hours |
-| **`cgm_daily_summary`** | **Mean / GMI / CV / 2 TIR profiles** |
+| `cgm_glucose_window` | All EGVs over last N hours (+ `hours_covered` — see the Libre ~12h limit) |
+| **`cgm_daily_summary`** | **Mean / GMI / CV / 2 TIR profiles — over `hours_covered`, not the requested window** |
 | **`cgm_meal_response`** | **Baseline → peak → return + band** |
 | `cgm_authorize_url` | Dexcom OAuth URL builder |
 | **`cgm_hypo_events`** | **Hypo event detection (ADA Level 1 < 70, Level 2 < 54) — v0.3.3** |

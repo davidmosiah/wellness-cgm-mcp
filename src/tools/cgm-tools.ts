@@ -2,14 +2,13 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DexcomClient } from "../services/dexcom-client.js";
 import { LibreLinkUpClient } from "../services/librelink-client.js";
-import { CgmSource } from "../services/cgm-source.js";
+import { CgmSource, coverageNotes, type LoadedReadings } from "../services/cgm-source.js";
 import {
   detectHypoEvents,
   mealResponse,
   mockReadings,
   summarize,
   timeInRangeWindow,
-  type GlucoseReading,
 } from "../services/glucose-engine.js";
 import { buildAgentManifest } from "../services/agent-manifest.js";
 import { buildCapabilities } from "../services/capabilities.js";
@@ -96,8 +95,26 @@ function jsonResponse(payload: unknown, privacy_mode?: string) {
   };
 }
 
-async function loadReadings(source: CgmSource, hours: number): Promise<{ readings: GlucoseReading[]; mock: boolean }> {
+async function loadReadings(source: CgmSource, hours: number): Promise<LoadedReadings> {
   return source.loadReadings(hours);
+}
+
+/**
+ * The window fields every hours-based payload must carry.
+ *
+ * A provider can return less history than was asked for (LibreLink Up caps a
+ * live read at ~12h and takes no start/end parameter). Echoing only the
+ * requested `hours` turned a half-day of data into a "72h" claim — and
+ * cgm_daily_summary ships no timestamps at all, so the caller had no way to
+ * catch it. These fields, plus `notes`, are that way out.
+ */
+function coverageFields(loaded: LoadedReadings): Record<string, unknown> {
+  return {
+    hours_requested: loaded.requested_hours,
+    hours_covered: loaded.covered_hours,
+    observed_window: loaded.observed_window,
+    window_truncated_by_provider: loaded.truncated,
+  };
 }
 
 export function registerCgmTools(server: McpServer): void {
@@ -221,7 +238,8 @@ export function registerCgmTools(server: McpServer): void {
     "cgm_glucose_window",
     {
       title: "CGM glucose window",
-      description: "Returns all EGVs over the last N hours (default 24).",
+      description:
+        "Returns all EGVs over the last N hours (default 24). `hours` is the window REQUESTED; `hours_covered` and `observed_window` state what the provider actually returned. FreeStyle Libre (LibreLink Up) caps a live read at ~12h regardless of the request, so any wider ask comes back short and `notes` says so — read the covered window, not the requested one.",
       inputSchema: {
         hours: z.number().int().min(1).max(72).optional(),
       },
@@ -229,8 +247,17 @@ export function registerCgmTools(server: McpServer): void {
     async ({ hours }) => {
       const source = CgmSource.resolve();
       const window = hours ?? 24;
-      const { readings, mock } = await loadReadings(source, window);
-      return jsonResponse({ ok: true, provider: source.provider, mock, hours: window, count: readings.length, readings });
+      const loaded = await loadReadings(source, window);
+      return jsonResponse({
+        ok: true,
+        provider: source.provider,
+        mock: loaded.mock,
+        hours: window,
+        ...coverageFields(loaded),
+        count: loaded.readings.length,
+        notes: coverageNotes(loaded),
+        readings: loaded.readings,
+      });
     },
   );
 
@@ -311,7 +338,7 @@ export function registerCgmTools(server: McpServer): void {
     {
       title: "CGM daily summary",
       description:
-        "Returns daily glucose stats: mean, median, min/max, stdev, GMI (estimated A1C), CV, time-in-range (diabetic 70-180 + metabolic-health 70-140).",
+        "Returns daily glucose stats: mean, median, min/max, stdev, GMI (estimated A1C), CV, time-in-range (diabetic 70-180 + metabolic-health 70-140). `window_hours` is what was REQUESTED; every stat is computed over `hours_covered` / `observed_window`, which can be shorter — FreeStyle Libre (LibreLink Up) caps a live read at ~12h, so a 72h request yields a half-day metric and `notes` flags it. Never report these numbers as covering more than `hours_covered`.",
       inputSchema: {
         hours: z.number().int().min(1).max(72).optional().describe("Window size; default 24."),
       },
@@ -319,9 +346,17 @@ export function registerCgmTools(server: McpServer): void {
     async ({ hours }) => {
       const source = CgmSource.resolve();
       const window = hours ?? 24;
-      const { readings, mock } = await loadReadings(source, window);
-      const summary = summarize(readings);
-      return jsonResponse({ ok: true, provider: source.provider, mock, window_hours: window, summary });
+      const loaded = await loadReadings(source, window);
+      const summary = summarize(loaded.readings);
+      return jsonResponse({
+        ok: true,
+        provider: source.provider,
+        mock: loaded.mock,
+        window_hours: window,
+        ...coverageFields(loaded),
+        notes: coverageNotes(loaded),
+        summary,
+      });
     },
   );
 
@@ -382,7 +417,8 @@ export function registerCgmTools(server: McpServer): void {
     async ({ start_time, end_time, target_low, target_high, hours, time_window, start_hour, end_hour }) => {
       const source = CgmSource.resolve();
       const loadHours = hours ?? 24;
-      const { readings, mock } = await loadReadings(source, loadHours);
+      const loaded = await loadReadings(source, loadHours);
+      const { readings, mock } = loaded;
       try {
         const tir = timeInRangeWindow(readings, {
           start_time,
@@ -393,7 +429,9 @@ export function registerCgmTools(server: McpServer): void {
           start_hour,
           end_hour,
         });
-        const notes: string[] = [];
+        // Provider-coverage warning first: it explains an unexpectedly small
+        // sample better than the generic small-sample note below.
+        const notes: string[] = [...coverageNotes(loaded)];
         if (tir.readings_in_window === 0) {
           notes.push(
             "No readings fell within the requested window. Widen start_time / end_time, load more hours, or relax the time_window/start_hour/end_hour filter.",
@@ -408,6 +446,8 @@ export function registerCgmTools(server: McpServer): void {
           provider: source.provider,
           mock,
           loaded_window_hours: loadHours,
+          hours_covered: loaded.covered_hours,
+          window_truncated_by_provider: loaded.truncated,
           requested_window: { start_time, end_time },
           requested_time_window: time_window ?? (start_hour !== undefined && end_hour !== undefined ? "custom" : "all"),
           target_range: { low: target_low ?? 70, high: target_high ?? 180 },

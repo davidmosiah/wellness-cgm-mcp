@@ -90,6 +90,7 @@ export function buildAgentManifest(client: CgmAgentClient = "generic"): CgmAgent
       "Call cgm_connection_status before any provider-backed tool — it reports the active provider (dexcom | libre) and mock vs live.",
       "Two real backends are supported: Dexcom (Developer API) and FreeStyle Libre via LibreLink Up. Select with CGM_PROVIDER, or it auto-detects (Libre when LIBRELINKUP_* creds are set and no DEXCOM_ACCESS_TOKEN).",
       "For FreeStyle Libre, run cgm_libre_login first to verify credentials and discover the patientId before reading glucose.",
+      "FreeStyle Libre (LibreLink Up) returns at most ~12h of history per live read — its graph endpoint takes no start/end parameter. Windowed tools report hours_requested, hours_covered, observed_window and window_truncated_by_provider: report hours_covered, never the requested window. A 12h GMI / CV / time-in-range is NOT a multi-day result; use Dexcom for multi-day metrics.",
       "Without any provider credentials, all glucose tools return mock data — clearly tagged.",
       "Surface the time-in-range profile being used (diabetic 70-180 vs metabolic-health 70-140).",
       "When meal_response band is 'poor', cross-reference the meal in wellness-nourish and suggest a swap.",

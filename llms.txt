@@ -15,8 +15,8 @@ Core tools:
 - cgm_privacy_audit — what is stored locally vs sent to the CGM provider
 - cgm_data_inventory — metric catalog, TIR ranges, GMI formula reference
 - cgm_glucose_now — most recent reading + trend (Dexcom or Libre)
-- cgm_glucose_window — all readings over last N hours (default 24)
-- cgm_daily_summary — mean/median/min/max/stdev + GMI + CV + 2 TIR profiles
+- cgm_glucose_window — all readings over last N hours (default 24); reports hours_covered + observed_window
+- cgm_daily_summary — mean/median/min/max/stdev + GMI + CV + 2 TIR profiles, computed over hours_covered
 - cgm_meal_response — baseline → peak → return-to-baseline + band (excellent/good/moderate/poor)
 - cgm_hypo_events — hypoglycemia event detection (ADA Level 1 < 70, Level 2 < 54)
 - cgm_authorize_url — Dexcom OAuth authorize URL builder
@@ -40,6 +40,7 @@ Optional env vars:
 Workflow for agents:
 1. Call cgm_connection_status — check the active provider (dexcom | libre) and whether mode=live or mode=mock. For Libre, run cgm_libre_login first to verify creds + discover the patientId.
 2. cgm_glucose_now for spot checks; cgm_daily_summary for trends.
+2b. On FreeStyle Libre, one live read returns at most ~12h: LibreLink Up's graph endpoint takes no start/end parameter. Windowed payloads carry hours_requested, hours_covered, observed_window and window_truncated_by_provider — report hours_covered, never the requested window, and use Dexcom for multi-day GMI/TIR. Mock mode covers the full requested span.
 3. cgm_meal_response with the meal_time from wellness-nourish to compute spike + band.
 4. Surface BOTH TIR profiles (diabetic 70-180 ADA + metabolic-health 70-140 Levels-style).
 5. NEVER recommend insulin/medication adjustments; defer to clinician.
@@ -57,6 +58,7 @@ Meal response bands (peak delta from baseline):
 Safety:
 - CGM data is medical-record sensitive — treat accordingly.
 - Mock mode clearly tagged via mock=true on every payload.
+- A metric is only as wide as hours_covered. Never present a Libre 12h GMI/TIR as a multi-day result.
 - Never claim diagnostic accuracy; readings are observed values.
 - For T1/T2 diabetics, defer dosing decisions to clinician.
 - Not affiliated with Dexcom or Abbott (FreeStyle Libre).
