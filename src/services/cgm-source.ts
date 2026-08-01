@@ -96,10 +96,28 @@ function withCoverage(
 }
 
 /**
+ * Coverage for a synthetic set of readings that no provider ceiling applies to.
+ * Used by `cgm_demo`, whose sample payload documents the contract: it must show
+ * the same coverage fields a live payload carries, computed the same way.
+ */
+export function syntheticCoverage(readings: GlucoseReading[], requestedHours: number): LoadedReadings {
+  return withCoverage(readings, requestedHours, true, null);
+}
+
+/**
  * Human-readable warnings for a load. Empty when the load covered what it was
  * asked for. Handlers that expose no timestamps (cgm_daily_summary) depend on
  * this being surfaced — without it the caller cannot tell a 3-day metric from a
  * half-day one.
+ *
+ * `truncated` is STRUCTURAL, not empirical: it fires when the active provider
+ * cannot honour a span that wide, never because a particular read came back
+ * short. A sensor applied two hours ago answers a 12h request with 2h of data —
+ * `hours_covered: 2`, `truncated: false`, no note — because nothing is wrong
+ * with the connector and an alarm there would be false. The honest number is
+ * always in `hours_covered`; an empty `notes` means "no known ceiling was hit",
+ * NOT "the window was fully covered". Compare `hours_covered` against
+ * `hours_requested` before reporting any span.
  */
 export function coverageNotes(loaded: LoadedReadings): string[] {
   if (!loaded.truncated) return [];
@@ -218,7 +236,9 @@ export class CgmSource {
    * detection). Mock mode synthesises a span that covers the window.
    */
   async loadReadingsWindow(startMs: number, endMs: number): Promise<LoadedReadings> {
-    const requestedHours = Math.max(0, (endMs - startMs) / (60 * 60 * 1000));
+    // Rounded like covered_hours: a caller passing "now" gets 72, not
+    // 72.00000027777777, and the two numbers stay comparable at a glance.
+    const requestedHours = round2(Math.max(0, (endMs - startMs) / (60 * 60 * 1000)));
     if (!this.hasAuth()) {
       const spanHours = Math.max(1, Math.ceil(requestedHours));
       return withCoverage(mockReadings(Math.min(spanHours, 72)), requestedHours, true, null);

@@ -115,7 +115,62 @@ assert.equal(tir72.ok, true);
 assert.equal(typeof tir72.hours_covered, "number", "cgm_time_in_range must declare hours_covered");
 assert.ok(tir72.hours_covered < tir72.loaded_window_hours, "time_in_range covered must be < loaded window");
 assert.ok(hasTruncationNote(tir72), `cgm_time_in_range must emit a coverage note; got ${JSON.stringify(tir72.notes)}`);
+assert.equal(tir72.hours_requested, 72, "cgm_time_in_range must report hours_requested like the other windowed tools");
+assert.ok(
+  tir72.observed_window && typeof tir72.observed_window.start === "string",
+  "cgm_time_in_range must expose observed_window — same contract as glucose_window/daily_summary",
+);
 console.log(`✓ cgm_time_in_range(72h, live libre): hours_covered=${tir72.hours_covered} + note`);
+
+// The fourth blind path: cgm_hypo_events asks for an explicit [from, to] span
+// and carries a medical disclaimer. "Any hypos in the last 3 days?" answered
+// from ~12h of data, with no coverage field, is the same defect as above.
+const hypoFrom = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+const hypoTo = new Date().toISOString();
+const hypo72 = await call(live, "cgm_hypo_events", { from: hypoFrom, to: hypoTo });
+assert.equal(hypo72.ok, true, `hypo_events not ok: ${JSON.stringify(hypo72)}`);
+assert.equal(hypo72.mock, false, "hypo_events must be in LIVE mode for this case");
+assert.equal(typeof hypo72.hours_covered, "number", "cgm_hypo_events must declare hours_covered");
+assert.ok(
+  hypo72.hours_covered > 10 && hypo72.hours_covered <= 13,
+  `hypo_events hours_covered should be the real ~12h span, got ${hypo72.hours_covered}`,
+);
+assert.ok(
+  hypo72.hours_requested >= 71 && hypo72.hours_requested <= 72,
+  `hypo_events must report the requested span too, got ${hypo72.hours_requested}`,
+);
+assert.equal(
+  hypo72.window_truncated_by_provider,
+  true,
+  "hypo_events must flag that the provider could not cover the requested 72h",
+);
+assert.ok(
+  hypo72.observed_window && typeof hypo72.observed_window.start === "string",
+  "hypo_events must keep observed_window",
+);
+assert.equal(
+  typeof hypo72.observed_window.hours,
+  "number",
+  "hypo_events observed_window must carry hours (days alone cannot express a 12h span)",
+);
+assert.ok(hasTruncationNote(hypo72), `cgm_hypo_events must emit a coverage note; got ${JSON.stringify(hypo72.notes)}`);
+console.log(
+  `✓ cgm_hypo_events(72h ask, live libre): hours_covered=${hypo72.hours_covered} truncated=${hypo72.window_truncated_by_provider} + note`,
+);
+
+// The compact shape drops the per-event array — coverage must survive it.
+const hypo72Summary = await call(live, "cgm_hypo_events", {
+  from: hypoFrom,
+  to: hypoTo,
+  response_format: "summary",
+});
+assert.equal(hypo72Summary.events, undefined, "summary format still omits the event array");
+assert.equal(
+  typeof hypo72Summary.hours_covered,
+  "number",
+  "hypo_events response_format=summary must still declare hours_covered",
+);
+assert.ok(hasTruncationNote(hypo72Summary), "hypo_events response_format=summary must still emit the coverage note");
 
 // ---------------------------------------------------------------------------
 // 2. LIVE libre, hours=6 — inside the ceiling. Must stay quiet (no false alarm).
@@ -151,6 +206,33 @@ assert.equal(mockSum.mock, true);
 assert.ok(mockSum.hours_covered > 71, `mock daily_summary must cover ~72h, got ${mockSum.hours_covered}`);
 assert.equal(hasTruncationNote(mockSum), false, "mock daily_summary must NOT emit a truncation note");
 console.log(`✓ mock mode 72h stays honest: hours_covered=${mockSum.hours_covered}, no note (no regression)`);
+
+const mockHypo = await call(mock, "cgm_hypo_events", {
+  from: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
+  to: new Date().toISOString(),
+});
+assert.equal(mockHypo.ok, true);
+assert.equal(mockHypo.mock, true);
+assert.ok(mockHypo.hours_covered > 71, `mock hypo_events must genuinely cover ~72h, got ${mockHypo.hours_covered}`);
+assert.equal(mockHypo.window_truncated_by_provider, false, "mock mode is not provider-truncated");
+assert.equal(hasTruncationNote(mockHypo), false, "mock hypo_events must NOT emit a truncation note");
+console.log(`✓ mock hypo_events 72h stays honest: hours_covered=${mockHypo.hours_covered}, no note`);
+
+// cgm_demo is documentation: its sample payload is what an agent reads to learn
+// the contract. A sample without the coverage fields teaches the pre-0.5.0 shape.
+const demo = await call(mock, "cgm_demo", {});
+const demoSummary = demo.sample.cgm_daily_summary;
+assert.equal(
+  typeof demoSummary.hours_covered,
+  "number",
+  "cgm_demo sample.cgm_daily_summary must show hours_covered — it is the documented shape",
+);
+assert.ok(
+  demoSummary.observed_window && typeof demoSummary.observed_window.start === "string",
+  "cgm_demo sample.cgm_daily_summary must show observed_window",
+);
+assert.equal(demoSummary.window_truncated_by_provider, false, "the synthetic demo window is never truncated");
+console.log(`✓ cgm_demo sample matches the live contract: hours_covered=${demoSummary.hours_covered}`);
 
 await mock.close();
 

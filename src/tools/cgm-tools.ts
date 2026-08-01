@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DexcomClient } from "../services/dexcom-client.js";
 import { LibreLinkUpClient } from "../services/librelink-client.js";
-import { CgmSource, coverageNotes, type LoadedReadings } from "../services/cgm-source.js";
+import { CgmSource, coverageNotes, syntheticCoverage, type LoadedReadings } from "../services/cgm-source.js";
 import {
   detectHypoEvents,
   mealResponse,
@@ -266,7 +266,7 @@ export function registerCgmTools(server: McpServer): void {
     {
       title: "CGM hypo events",
       description:
-        "v0.3.3 — Detect hypoglycemia events between `from` and `to` ISO dates. Returns an array of contiguous below-threshold runs lasting ≥ `min_duration_minutes`, each with `started_at`, `ended_at`, `duration_minutes`, `min_glucose_mg_dl`, `mean_glucose_mg_dl`, `severity` (level_1 = <70 ADA Level 1, level_2 = <54 ADA Level 2), and `recovery_time_minutes` (time to first reading ≥ threshold+10). Also returns `total_events`, `total_minutes_below`, `mean_min_glucose`, `events_per_day`, a `summary` string, and `recommendations` grounded in what was actually observed. **MEDICAL DISCLAIMER: NOT medical advice. Do not use for treatment decisions. Hypo events should be discussed with your clinician.**",
+        "v0.3.3 — Detect hypoglycemia events between `from` and `to` ISO dates. Returns an array of contiguous below-threshold runs lasting ≥ `min_duration_minutes`, each with `started_at`, `ended_at`, `duration_minutes`, `min_glucose_mg_dl`, `mean_glucose_mg_dl`, `severity` (level_1 = <70 ADA Level 1, level_2 = <54 ADA Level 2), and `recovery_time_minutes` (time to first reading ≥ threshold+10). Also returns `total_events`, `total_minutes_below`, `mean_min_glucose`, `events_per_day`, a `summary` string, and `recommendations` grounded in what was actually observed. `window` is the span REQUESTED; `hours_covered`, `observed_window` and `window_truncated_by_provider` state what the provider actually returned — FreeStyle Libre (LibreLink Up) caps a live read at ~12h, so a 3-day question can be answered from half a day and `notes` says so. \"No hypos\" is only true for `hours_covered`. **MEDICAL DISCLAIMER: NOT medical advice. Do not use for treatment decisions. Hypo events should be discussed with your clinician.**",
       inputSchema: {
         from: z.string().describe("ISO-8601 timestamp / date of the analysis window start."),
         to: z.string().describe("ISO-8601 timestamp / date of the analysis window end."),
@@ -305,7 +305,8 @@ export function registerCgmTools(server: McpServer): void {
       if (endMs <= startMs) {
         return jsonResponse({ ok: false, error: "invalid_window", message: "to must be after from" });
       }
-      const { readings, mock } = await source.loadReadingsWindow(startMs, endMs);
+      const loaded = await source.loadReadingsWindow(startMs, endMs);
+      const { readings, mock } = loaded;
       try {
         const result = detectHypoEvents(readings, {
           threshold_mg_dl,
@@ -322,6 +323,12 @@ export function registerCgmTools(server: McpServer): void {
           medical_disclaimer:
             "NOT medical advice. Do not use for treatment decisions. Hypo events should be discussed with your clinician.",
           ...result,
+          ...coverageFields(loaded),
+          // detectHypoEvents already reports observed_window in DAYS (the unit
+          // events_per_day is built on). Keep it and add `hours`: a Libre live
+          // read spans ~12h, which rounds to "1 day" and hides the truncation.
+          observed_window: { ...result.observed_window, hours: loaded.covered_hours },
+          notes: coverageNotes(loaded),
         };
         if (response_format === "summary") {
           delete (payload as Record<string, unknown>).events;
@@ -446,8 +453,7 @@ export function registerCgmTools(server: McpServer): void {
           provider: source.provider,
           mock,
           loaded_window_hours: loadHours,
-          hours_covered: loaded.covered_hours,
-          window_truncated_by_provider: loaded.truncated,
+          ...coverageFields(loaded),
           requested_window: { start_time, end_time },
           requested_time_window: time_window ?? (start_hour !== undefined && end_hour !== undefined ? "custom" : "all"),
           target_range: { low: target_low ?? 70, high: target_high ?? 180 },
@@ -675,6 +681,9 @@ export function registerCgmTools(server: McpServer): void {
     },
     async () => {
       const sampleReadings = mockReadings(24, 95);
+      // The sample IS the documented shape — build its coverage the same way a
+      // live load does, so cgm_demo never teaches a payload that no longer exists.
+      const sampleLoaded = syntheticCoverage(sampleReadings, 24);
       const summary = summarize(sampleReadings);
       const mealResp = mealResponse(sampleReadings, new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString());
       const latest = sampleReadings[sampleReadings.length - 1];
@@ -683,7 +692,14 @@ export function registerCgmTools(server: McpServer): void {
         is_demo: true,
         sample: {
           cgm_glucose_now: { ok: true, mock: true, latest },
-          cgm_daily_summary: { ok: true, mock: true, window_hours: 24, summary },
+          cgm_daily_summary: {
+            ok: true,
+            mock: true,
+            window_hours: 24,
+            ...coverageFields(sampleLoaded),
+            notes: coverageNotes(sampleLoaded),
+            summary,
+          },
           cgm_meal_response: { ok: true, mock: true, response: mealResp },
         },
         notes: [

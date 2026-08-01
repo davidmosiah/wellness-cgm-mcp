@@ -110,6 +110,14 @@ Every windowed payload therefore reports what it actually covered:
 
 Read `hours_covered`, never the requested `hours` / `window_hours`. A GMI (estimated A1C), CV or time-in-range built on 12h is not a 3-day result. **For multi-day metrics use Dexcom**, whose v3 API takes an explicit start/end and honours the request. Mock mode synthesises the full requested span, so it is never truncated.
 
+The same applies to `cgm_hypo_events`, which takes an explicit `from`/`to`: "no hypoglycemia events" is only a claim about `hours_covered`. A 3-day question answered from a live Libre read is a 12-hour answer, and the payload says so in `hours_covered`, `observed_window.hours`, `window_truncated_by_provider` and `notes`. (`events_per_day` is safe either way — its denominator is the observed span, not the requested one — but the frame around it is not.)
+
+#### `window_truncated_by_provider` is structural, not empirical
+
+It answers *"can this provider cover a span this wide?"* — never *"did this particular read come back short?"*. A sensor applied two hours ago answers `cgm_daily_summary({ hours: 12 })` with `hours_covered: 2`, `window_truncated_by_provider: false` and an empty `notes`, because nothing is broken and warning there would be a false alarm. That is deliberate:
+
+> **An empty `notes` means "no known provider ceiling was hit", not "the window was fully covered".** `hours_covered` is the only number that states the real span — compare it against `hours_requested` before reporting any window.
+
 ## Tools (19)
 
 | Tool | Purpose |
@@ -124,7 +132,7 @@ Read `hours_covered`, never the requested `hours` / `window_hours`. A GMI (estim
 | **`cgm_daily_summary`** | **Mean / GMI / CV / 2 TIR profiles — over `hours_covered`, not the requested window** |
 | **`cgm_meal_response`** | **Baseline → peak → return + band** |
 | `cgm_authorize_url` | Dexcom OAuth URL builder |
-| **`cgm_hypo_events`** | **Hypo event detection (ADA Level 1 < 70, Level 2 < 54) — v0.3.3** |
+| **`cgm_hypo_events`** | **Hypo event detection (ADA Level 1 < 70, Level 2 < 54) — "no events" applies to `hours_covered` only** |
 | **`cgm_libre_status`** | **FreeStyle Libre (LibreLink Up) config + region + mode — v0.4** |
 | **`cgm_libre_login`** | **Log in to LibreLink Up + list followed sensors — v0.4** |
 

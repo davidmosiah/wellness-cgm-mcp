@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0 - 2026-08-01
+
+### Fixed
+
+- **`cgm_hypo_events` was the fourth blind path and 0.5.0 missed it — the one tool that ships a medical disclaimer.** It already loads through `loadReadingsWindow`, which since 0.5.0 computes real coverage; the handler destructured `{ readings, mock }` and threw the rest away. Its output was byte-for-byte identical before and after the 0.5.0 fix. On a live FreeStyle Libre sensor, `cgm_hypo_events(from: -72h, to: now)` answered **"No hypoglycemia events detected … across 49 readings"** with `window: { from: -72h, to: now }` and no coverage field anywhere — a 3-day frame over ~12h of data. An agent asked *"did I go low in the last 3 days?"* would say no, confidently, having seen half a day.
+  - The payload now carries the same contract as every other windowed tool: `hours_requested`, `hours_covered`, `window_truncated_by_provider`, `notes`, and `observed_window` gains `hours` alongside its existing `days` (a 12h span rounds to "1 day", which hid the truncation). `response_format: "summary"` keeps all of it.
+  - **What was NOT wrong, stated plainly:** `events_per_day` and the "N/day" phrase in `summary` were already computed against the *observed* span, so the rate never inflated. The lie was the frame around it — the window echoed back and the absence of any coverage field — not the arithmetic.
+- **`cgm_time_in_range` had a partial version of the contract.** 0.5.0 gave it `hours_covered` and `window_truncated_by_provider` but not `hours_requested` / `observed_window`, so a caller could not do the comparison the other two tools invite. All four windowed tools now emit the identical four fields.
+- **`cgm_demo` documented a payload that no longer exists.** Its `sample.cgm_daily_summary` still showed the pre-0.5.0 shape, without `hours_covered` / `observed_window` — and `cgm_demo` is precisely what an agent calls to learn the contract before wiring credentials. The sample is now built through the same coverage code the live path uses, so it cannot drift again.
+- `loadReadingsWindow` rounds `requested_hours` to 2 decimals: a `from`/`to` of "72 hours ago → now" reported `72.00000027777777`.
+
+### Documented
+
+- **`window_truncated_by_provider` is structural, not empirical — now said out loud** (README, `llms.txt`, `cgm_agent_manifest`, `coverageNotes` JSDoc). It answers "can this provider cover a span this wide?", never "did this read come back short?". A sensor applied two hours ago answers a 12h request with `hours_covered: 2`, `truncated: false`, empty `notes` — deliberate, because nothing is broken and an alarm there would be false. The consequence had never been written down: **empty `notes` means "no known ceiling was hit", NOT "the window was fully covered".** Compare `hours_covered` against `hours_requested` before reporting any span.
+
+### Added
+
+- The regression gate `scripts/libre-window-test.mjs` now covers the hypo path: live Libre + a 72h `from`/`to` must declare ~12h covered, `window_truncated_by_provider: true`, `observed_window.hours` and the note — in both `structured` and `summary` shapes; mock mode must stay quiet at a genuine ~72h; and `cgm_demo`'s sample must carry the coverage fields. Verified failing on 0.5.0 (`cgm_hypo_events must declare hours_covered: 'undefined' !== 'number'`) and passing on 0.6.0. All fixture data synthetic.
+
+### Changed
+
+- Minor, not patch: `cgm_hypo_events` and `cgm_time_in_range` gained output fields, and `observed_window` on `cgm_hypo_events` gained a key. Nothing was removed or renamed — existing callers keep working.
+
 ## 0.5.0 - 2026-08-01
 
 ### Fixed
