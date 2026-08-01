@@ -61,6 +61,50 @@ const call = async (client, name, args) =>
 const hasTruncationNote = (payload) =>
   Array.isArray(payload.notes) && payload.notes.some((n) => /covered/i.test(n) && /LibreLink Up/i.test(n));
 
+/**
+ * `observed_window` is a published payload shape, so its KEY SET is a contract,
+ * not an implementation detail.
+ *
+ * Two variants exist on purpose:
+ *   - hours-based tools (glucose_window / daily_summary / time_in_range / demo)
+ *     emit { start, end, hours };
+ *   - cgm_hypo_events emits { start, end, days, hours } — `days` is what
+ *     `events_per_day` is divided by and predates 0.5.0, so it is kept for
+ *     existing consumers, and `hours` was added on top because a ~12h Libre
+ *     read rounds to "1 day" and hides the truncation.
+ *
+ * Asserting only "hours is a number" cannot catch dropping `days` (the base
+ * coverage object already carries hours), and asserting only "days exists"
+ * cannot catch losing the hours override. Both variants are pinned exactly, so
+ * deleting either side of the merge in cgm_hypo_events fails this gate.
+ */
+function assertObservedWindowShape(payload, label, { days = false } = {}) {
+  const observed = payload.observed_window;
+  assert.ok(observed && typeof observed === "object", `${label} must expose observed_window`);
+  const expected = days ? ["days", "end", "hours", "start"] : ["end", "hours", "start"];
+  assert.deepEqual(
+    Object.keys(observed).sort(),
+    expected,
+    `${label} observed_window shape drifted — consumers read these keys. Got ${JSON.stringify(
+      Object.keys(observed).sort(),
+    )}, expected ${JSON.stringify(expected)}`,
+  );
+  assert.equal(typeof observed.start, "string", `${label} observed_window.start must be an ISO string`);
+  assert.equal(typeof observed.end, "string", `${label} observed_window.end must be an ISO string`);
+  assert.equal(
+    typeof observed.hours,
+    "number",
+    `${label} observed_window.hours must be a number (days alone cannot express a 12h span)`,
+  );
+  if (days) {
+    assert.equal(
+      typeof observed.days,
+      "number",
+      `${label} observed_window.days must be preserved — events_per_day is built on it`,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 1. LIVE libre, hours=72 — the actual defect.
 // ---------------------------------------------------------------------------
@@ -81,6 +125,7 @@ assert.ok(
   win72.observed_window && typeof win72.observed_window.start === "string",
   "cgm_glucose_window must expose observed_window.start (same idiom as cgm_hypo_events)",
 );
+assertObservedWindowShape(win72, "cgm_glucose_window(72h, live libre)");
 assert.ok(hasTruncationNote(win72), `cgm_glucose_window must emit a coverage note; got ${JSON.stringify(win72.notes)}`);
 console.log(
   `✓ cgm_glucose_window(72h, live libre): hours_covered=${win72.hours_covered} + note ("${win72.notes[0].slice(0, 64)}…")`,
@@ -104,6 +149,7 @@ assert.ok(
   sum72.observed_window && typeof sum72.observed_window.start === "string",
   "cgm_daily_summary must expose observed_window so a timestamp-less caller can verify the span",
 );
+assertObservedWindowShape(sum72, "cgm_daily_summary(72h, live libre)");
 assert.ok(hasTruncationNote(sum72), `cgm_daily_summary must emit a coverage note; got ${JSON.stringify(sum72.notes)}`);
 console.log(
   `✓ cgm_daily_summary(72h, live libre): window_hours=${sum72.window_hours} hours_covered=${sum72.hours_covered} GMI=${sum72.summary.gmi_pct}% + note`,
@@ -120,6 +166,7 @@ assert.ok(
   tir72.observed_window && typeof tir72.observed_window.start === "string",
   "cgm_time_in_range must expose observed_window — same contract as glucose_window/daily_summary",
 );
+assertObservedWindowShape(tir72, "cgm_time_in_range(72h, live libre)");
 console.log(`✓ cgm_time_in_range(72h, live libre): hours_covered=${tir72.hours_covered} + note`);
 
 // The fourth blind path: cgm_hypo_events asks for an explicit [from, to] span
@@ -153,6 +200,15 @@ assert.equal(
   "number",
   "hypo_events observed_window must carry hours (days alone cannot express a 12h span)",
 );
+// The compatibility decision under test: hypo_events merges the engine's
+// day-based window with the hour-based coverage. Dropping either half changes
+// the payload shape for consumers — this pins both.
+assertObservedWindowShape(hypo72, "cgm_hypo_events(72h ask, live libre)", { days: true });
+assert.equal(
+  hypo72.observed_window.hours,
+  hypo72.hours_covered,
+  "hypo_events observed_window.hours must be the covered span, not the requested one",
+);
 assert.ok(hasTruncationNote(hypo72), `cgm_hypo_events must emit a coverage note; got ${JSON.stringify(hypo72.notes)}`);
 console.log(
   `✓ cgm_hypo_events(72h ask, live libre): hours_covered=${hypo72.hours_covered} truncated=${hypo72.window_truncated_by_provider} + note`,
@@ -171,6 +227,7 @@ assert.equal(
   "hypo_events response_format=summary must still declare hours_covered",
 );
 assert.ok(hasTruncationNote(hypo72Summary), "hypo_events response_format=summary must still emit the coverage note");
+assertObservedWindowShape(hypo72Summary, "cgm_hypo_events(response_format=summary)", { days: true });
 
 // ---------------------------------------------------------------------------
 // 2. LIVE libre, hours=6 — inside the ceiling. Must stay quiet (no false alarm).
@@ -215,6 +272,7 @@ assert.equal(mockHypo.ok, true);
 assert.equal(mockHypo.mock, true);
 assert.ok(mockHypo.hours_covered > 71, `mock hypo_events must genuinely cover ~72h, got ${mockHypo.hours_covered}`);
 assert.equal(mockHypo.window_truncated_by_provider, false, "mock mode is not provider-truncated");
+assertObservedWindowShape(mockHypo, "cgm_hypo_events(72h, mock)", { days: true });
 assert.equal(hasTruncationNote(mockHypo), false, "mock hypo_events must NOT emit a truncation note");
 console.log(`✓ mock hypo_events 72h stays honest: hours_covered=${mockHypo.hours_covered}, no note`);
 
@@ -231,6 +289,7 @@ assert.ok(
   demoSummary.observed_window && typeof demoSummary.observed_window.start === "string",
   "cgm_demo sample.cgm_daily_summary must show observed_window",
 );
+assertObservedWindowShape(demoSummary, "cgm_demo sample.cgm_daily_summary");
 assert.equal(demoSummary.window_truncated_by_provider, false, "the synthetic demo window is never truncated");
 console.log(`✓ cgm_demo sample matches the live contract: hours_covered=${demoSummary.hours_covered}`);
 

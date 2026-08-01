@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.1 - 2026-08-01
+
+### Fixed
+
+- **The `observed_window` compatibility decision from 0.6.0 was undefended: the gate stayed green while the payload changed shape.** In `cgm_hypo_events` the handler deliberately merges two objects — the engine's day-based `observed_window` (`start`, `end`, `days`, the divisor behind `events_per_day`) with the hour-based coverage added in 0.6.0 (`hours`). The gate only asserted `typeof observed_window.hours === "number"`, and the *base* coverage object already carries `hours` — so deleting the merge line dropped `days` from the payload and every test still passed. Proven on the 0.6.0 tree: line removed → `npm test` green, agents reading `observed_window.days` broken with no signal.
+  - `scripts/libre-window-test.mjs` now pins the exact key set of `observed_window` on every handler that emits it: `{ start, end, hours }` for `cgm_glucose_window`, `cgm_daily_summary`, `cgm_time_in_range` and the `cgm_demo` sample; `{ start, end, days, hours }` for `cgm_hypo_events` in both `structured` and `summary` shapes and in mock mode. It also asserts `observed_window.hours === hours_covered`, so the field cannot silently revert to the requested span.
+  - Verified failing with the merge line removed (`actual [end, hours, start] !== expected [days, end, hours, start]`) and passing on the shipped tree.
+
+### Changed
+
+- Test-only release. **No runtime behaviour changed** — `dist/` is byte-identical to 0.6.0 apart from the version string. Agents see the same payloads; the difference is that CI will now catch the next person who breaks them.
+
 ## 0.6.0 - 2026-08-01
 
 ### Fixed
