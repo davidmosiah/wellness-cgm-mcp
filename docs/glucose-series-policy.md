@@ -1,3 +1,4 @@
-# Glucose density
+# glucose_series policy
 
-Prefer window rollups; series must use agent-safe-series/v1 caps.
+Dense glucose series only if a real agent user requests it with a use case.
+Until then: summary tools + honest gap.
