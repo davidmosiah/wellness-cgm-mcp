@@ -1,6 +1,6 @@
 {
   "name": "wellness-cgm-mcp",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Local-first continuous glucose monitor MCP for AI agents \u2014 Dexcom Developer API (sandbox + production). Pair with wellness-nourish for meal-glucose correlation.",
   "license": "MIT",
   "type": "module",
@@ -73,10 +73,10 @@
   "main": "dist/index.js",
   "overrides": {
     "qs": "6.15.2",
-    "hono": "4.12.30",
+    "hono": "4.13.1",
     "fast-uri": "3.1.5",
     "ip-address": "10.4.0",
-    "@hono/node-server": "2.0.12",
+    "@hono/node-server": "2.1.0",
     "body-parser": "2.3.0"
   }
 }
