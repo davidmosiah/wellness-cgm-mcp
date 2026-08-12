@@ -29,6 +29,19 @@
 > - [Delx Wellness for OpenClaw](https://github.com/davidmosiah/delx-wellness-openclaw): `npx -y delx-wellness-openclaw setup`
 
 ---
+
+## HTTP (v2 stateless)
+
+Default is **stdio**. Optional Streamable HTTP — no session id, JSON responses, loopback only:
+
+```bash
+npx -y wellness-cgm-mcp --http
+# GET  http://127.0.0.1:3000/health
+# POST http://127.0.0.1:3000/mcp   (sessionless)
+```
+
+Env: `WELLNESS_CGM_HOST`, `WELLNESS_CGM_PORT`, `WELLNESS_CGM_TRANSPORT=http`.
+
 <!-- /delx-wellness header v2 -->
 
 ## Overview
