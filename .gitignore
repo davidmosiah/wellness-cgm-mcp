@@ -6,3 +6,6 @@ dist/
 .env.local
 coverage/
 *.tsbuildinfo
+tokens.json
+config.json
+.wellness-cgm-mcp/
