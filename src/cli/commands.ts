@@ -3,6 +3,7 @@ import { DexcomClient } from "../services/dexcom-client.js";
 import { LibreLinkUpClient } from "../services/librelink-client.js";
 import { buildCapabilities } from "../services/capabilities.js";
 import { buildPrivacyAudit } from "../services/privacy-audit.js";
+import { runToolCall } from "./tool-calls.js";
 import {
   getOnboardingFlow,
   getProfile,
@@ -10,7 +11,7 @@ import {
   missingCriticalFields,
 } from "../services/profile-store.js";
 
-const COMMANDS = new Set([
+const COMMANDS = new Set(["call", 
   "status",
   "doctor",
   "setup",
@@ -41,6 +42,8 @@ export async function runCliCommand(args: string[]): Promise<number> {
   const [command, ...rest] = args;
   try {
     switch (command) {
+      case "call":
+        return runToolCall(rest);
       case "status":
         return printStatus();
       case "doctor":

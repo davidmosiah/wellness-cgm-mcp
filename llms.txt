@@ -64,3 +64,6 @@ Safety:
 - Never claim diagnostic accuracy; readings are observed values.
 - For T1/T2 diabetics, defer dosing decisions to clinician.
 - Not affiliated with Dexcom or Abbott (FreeStyle Libre).
+
+Skill (same gates, no MCP client required): skill/SKILL.md
+npx -y wellness-cgm call <tool> --json '{...}'

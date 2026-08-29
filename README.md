@@ -219,3 +219,13 @@ Run `wellness-cgm-mcp doctor` to inspect.
 MIT — see [LICENSE](LICENSE).
 
 <sub>wellness-cgm-mcp is independent open-source software. Dexcom and FreeStyle Libre are trademarks of their respective owners. Neither company is affiliated with or endorses this project.</sub>
+
+## Skill or MCP
+
+Same package, two doors. MCP registers tools on stdio/HTTP. The [skill](skill/SKILL.md) can drive the **same** tools through the CLI when the client has no MCP:
+
+```bash
+npx -y wellness-cgm call cgm_connection_status --json '{}'
+```
+
+Copy `skill/SKILL.md` into your agent skills dir.

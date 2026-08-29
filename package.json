@@ -1,6 +1,6 @@
 {
   "name": "wellness-cgm-mcp",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Local-first continuous glucose monitor MCP for AI agents \u2014 Dexcom Developer API (sandbox + production). Pair with wellness-nourish for meal-glucose correlation.",
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,8 @@
     "SECURITY.md",
     "CHANGELOG.md",
     "server.json",
-    "llms.txt"
+    "llms.txt",
+    "skill"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -26,8 +27,9 @@
     "test:libre-window": "node scripts/libre-window-test.mjs",
     "test:metadata": "node scripts/metadata-check.mjs",
     "test:providers": "node scripts/provider-contract-test.mjs",
-    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:libre-window && npm run test:metadata && npm run test:providers",
-    "prepublishOnly": "npm test"
+    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:libre-window && npm run test:metadata && npm run test:providers && npm run test:skill-surface",
+    "prepublishOnly": "npm test",
+    "test:skill-surface": "node scripts/test-skill-surface.mjs"
   },
   "engines": {
     "node": ">=20"
