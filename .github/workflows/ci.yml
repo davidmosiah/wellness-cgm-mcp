@@ -25,8 +25,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm install
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm run smoke
-      - run: npm run test:metadata
+      - run: npm ci
+      - run: npm test
