@@ -10,7 +10,7 @@ import { registerCgmResources } from "./resources/cgm-resources.js";
 import { registerCgmTools } from "./tools/cgm-tools.js";
 
 function createServer(): McpServer {
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { maxToolInputElements: 10_000 });
   registerCgmTools(server);
   registerCgmResources(server);
   return server;
@@ -28,7 +28,7 @@ async function runHttp(): Promise<void> {
   const port = Number(process.env.WELLNESS_CGM_PORT ?? DEFAULT_PORT);
   const allowedOrigin = process.env.WELLNESS_CGM_ALLOWED_ORIGIN ?? `http://${host}:${port}`;
 
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "1mb", inflate: false }));
   app.use(cors({ origin: allowedOrigin }));
 
   app.get("/health", (_req, res) => res.json({ ok: true, name: SERVER_NAME, version: SERVER_VERSION }));
