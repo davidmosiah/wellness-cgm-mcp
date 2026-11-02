@@ -1,7 +1,7 @@
 {
   "name": "wellness-cgm-mcp",
-  "version": "0.6.4",
-  "description": "Local-first continuous glucose monitor MCP for AI agents \u2014 Dexcom Developer API (sandbox + production). Pair with wellness-nourish for meal-glucose correlation.",
+  "version": "0.7.0",
+  "description": "Local-first continuous glucose monitor MCP for AI agents — Dexcom Developer API (sandbox + production). Pair with wellness-nourish for meal-glucose correlation.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -27,13 +27,14 @@
     "test:libre-window": "node scripts/libre-window-test.mjs",
     "test:metadata": "node scripts/metadata-check.mjs",
     "test:providers": "node scripts/provider-contract-test.mjs",
-    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:libre-window && npm run test:metadata && npm run test:providers && npm run test:skill-surface && npm run test:input-limits && npm run test:profile-boundaries && npm run test:profile-storage && npm run test:http-local-only",
+    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:libre-window && npm run test:metadata && npm run test:providers && npm run test:skill-surface && npm run test:input-limits && npm run test:profile-boundaries && npm run test:profile-storage && npm run test:http-local-only && npm run test:release-metadata",
     "prepublishOnly": "npm test",
     "test:skill-surface": "node scripts/test-skill-surface.mjs",
     "test:input-limits": "node scripts/input-limits-test.mjs",
     "test:profile-boundaries": "node scripts/test-profile-boundaries.mjs",
     "test:profile-storage": "node scripts/test-profile-storage.mjs",
-    "test:http-local-only": "node scripts/test-http-local-only.mjs"
+    "test:http-local-only": "node scripts/test-http-local-only.mjs",
+    "test:release-metadata": "node scripts/test-release-metadata.mjs"
   },
   "engines": {
     "node": ">=20"

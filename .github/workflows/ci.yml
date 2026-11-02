@@ -25,5 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm test
+      - run: npm audit
+      - run: npm pack --ignore-scripts --dry-run --json

@@ -35,7 +35,7 @@
 Default is **stdio**. Optional Streamable HTTP — no session id, JSON responses, loopback only:
 
 ```bash
-npx -y wellness-cgm-mcp --http
+npx -y wellness-cgm-mcp@0.7.0 --http
 # GET  http://127.0.0.1:3000/health
 # POST http://127.0.0.1:3000/mcp   (sessionless)
 ```
@@ -51,15 +51,15 @@ Local MCP server that exposes CGM data (and synthetic mock data when nothing is 
 ## Try It In 60 Seconds (mock mode, zero setup)
 
 ```bash
-npx -y wellness-cgm-mcp doctor       # see env / mode
-npx -y wellness-cgm-mcp status
+npx -y wellness-cgm-mcp@0.7.0 doctor       # see env / mode
+npx -y wellness-cgm-mcp@0.7.0 status
 
 # In Claude Desktop / Cursor / etc., add:
 # {
 #   "mcpServers": {
 #     "wellness-cgm": {
 #       "command": "npx",
-#       "args": ["-y", "wellness-cgm-mcp"]
+#       "args": ["-y", "wellness-cgm-mcp@0.7.0"]
 #     }
 #   }
 # }
@@ -78,10 +78,10 @@ export DEXCOM_CLIENT_SECRET=...
 export DEXCOM_REDIRECT_URI=https://your.callback/redirect
 
 # 3. Get the OAuth URL, open it, grant access, copy the code from the redirect
-npx -y wellness-cgm-mcp authorize
+npx -y wellness-cgm-mcp@0.7.0 authorize
 
 # 4. Swap code for tokens
-npx -y wellness-cgm-mcp exchange <auth_code_from_redirect>
+npx -y wellness-cgm-mcp@0.7.0 exchange <auth_code_from_redirect>
 
 # 5. Set DEXCOM_ACCESS_TOKEN to the access_token, restart the MCP — flips from mock to live.
 ```
@@ -99,7 +99,7 @@ export LIBRELINKUP_REGION=us            # eu (default) | us | de | fr | au | jp 
 # export LIBRELINKUP_PATIENT_ID=<id>    # only if you follow more than one sensor
 
 # Verify credentials + list the sensor(s) you follow (never prints the token):
-npx -y wellness-cgm-mcp libre-login
+npx -y wellness-cgm-mcp@0.7.0 libre-login
 ```
 
 Once logged in, every glucose tool (`cgm_glucose_now`, `cgm_daily_summary`, `cgm_time_in_range`, `cgm_meal_response`, `cgm_hypo_events`, …) reads from Libre and returns the same ADA TIR / GMI / hypo / meal-response metrics — each response carries a `provider` field so you always know the source. Without any credentials, everything returns synthetic `mock: true` data.
@@ -225,7 +225,18 @@ MIT — see [LICENSE](LICENSE).
 Same package, two doors. MCP registers tools on stdio/HTTP. The [skill](skill/SKILL.md) can drive the **same** tools through the CLI when the client has no MCP:
 
 ```bash
-npx -y wellness-cgm call cgm_connection_status --json '{}'
+npx -y wellness-cgm-mcp@0.7.0 call cgm_connection_status --json '{}'
 ```
 
 Copy `skill/SKILL.md` into your agent skills dir.
+
+## 0.7.0 — candidate (2026-11-02)
+
+This is a release candidate, not evidence of an npm publication. Existing installations are not updated automatically.
+
+### Migration and security boundaries
+
+- HTTP transport accepts loopback only. LAN addresses and wildcard binds are rejected; use stdio or a local loopback client instead.
+- Wellness profiles are validated, limited to 256 KiB, and protected with a cooperative lock. Oversized or invalid existing profiles must be corrected before use. Symbolic links, including dangling links and legacy profile paths, are rejected. These checks do not guarantee safety against a hostile local filesystem or non-cooperating processes.
+- MCP inputs have a 10,000-element budget and HTTP bodies are limited to 1 MiB; compressed request bodies are rejected. Previously accepted oversized requests may now fail; reduce request sizes rather than disabling validation.
+- Dependency fixes are included. Upgrade explicitly after publication and restart the connector; old installations retain their previous behavior.
