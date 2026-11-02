@@ -5,7 +5,7 @@ Local-first continuous glucose monitor MCP for AI agents. Two real backends: Dex
 Repository: https://github.com/davidmosiah/wellness-cgm-mcp
 NPM: https://www.npmjs.com/package/wellness-cgm-mcp
 Docs: https://wellness.delx.ai/connectors/cgm
-Primary command: npx -y wellness-cgm-mcp doctor
+Primary command: npx -y wellness-cgm-mcp@0.7.0 doctor
 MCP command: wellness-cgm-mcp
 
 Core tools:
@@ -66,4 +66,4 @@ Safety:
 - Not affiliated with Dexcom or Abbott (FreeStyle Libre).
 
 Skill (same gates, no MCP client required): skill/SKILL.md
-npx -y wellness-cgm call <tool> --json '{...}'
+npx -y wellness-cgm-mcp@0.7.0 call <tool> --json '{...}'

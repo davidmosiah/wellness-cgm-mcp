@@ -14,7 +14,7 @@ Same binary either way. Do not duplicate the API client.
 **MCP** — tools appear natively after stdio/HTTP config:
 
 ```json
-{ "mcpServers": { "wellness-cgm": { "command": "npx", "args": ["-y", "wellness-cgm"] } } }
+{ "mcpServers": { "wellness-cgm": { "command": "npx", "args": ["-y", "wellness-cgm-mcp@0.7.0"] } } }
 ```
 
 Do not put mutation flags in that snippet.
@@ -22,7 +22,7 @@ Do not put mutation flags in that snippet.
 **Skill / CLI** — no MCP client required. Same tools:
 
 ```bash
-npx -y wellness-cgm call cgm_connection_status --json '{}'
+npx -y wellness-cgm-mcp@0.7.0 call cgm_connection_status --json '{}'
 ```
 
 If MCP tools named `cgm_*` are already available, use them. Do not also shell out.
